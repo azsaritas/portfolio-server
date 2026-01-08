@@ -7,6 +7,7 @@ import { BIST_STOCKS } from '@/data/bist_stocks';
 import { CRYPTO_COINS } from '@/data/crypto_coins';
 import { METALS } from '@/data/metals';
 import { TEFAS_FUNDS } from '@/data/tefas_funds';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 // Cash currencies
 const CASH_CURRENCIES = [
@@ -101,7 +102,7 @@ export default function Home() {
   const fetchHoldings = async () => {
     setLoading(true);
     try {
-      const res = await fetch('http://141.144.249.56:8000/holdings');
+      const res = await fetch(`${API_BASE_URL}/holdings`);
       if (!res.ok) throw new Error('Failed to fetch holdings');
       const data = await res.json();
       setHoldings(data);
@@ -126,14 +127,14 @@ export default function Home() {
 
   const fetchHistory = async () => {
       try {
-          const res = await fetch('http://141.144.249.56:8000/portfolio/history');
+          const res = await fetch(`${API_BASE_URL}/portfolio/history`);
           if (res.ok) {
               const data = await res.json();
               setHistoryData(data);
           }
           
           // Fetch Stats
-          const statsRes = await fetch('http://141.144.249.56:8000/portfolio/stats');
+          const statsRes = await fetch(`${API_BASE_URL}/portfolio/stats`);
           if (statsRes.ok) {
               const statsData = await statsRes.json();
               setPortfolioStats(statsData);
@@ -144,7 +145,26 @@ export default function Home() {
   };
 
   useEffect(() => {
-    fetchHoldings();
+    // Auto-refresh logic: Only refresh if 10+ minutes since last refresh
+    const checkAndFetch = async () => {
+      const REFRESH_INTERVAL = 1 * 30 * 1000; // 10 minutes in ms
+      const lastRefresh = parseInt(localStorage.getItem('portfolio_last_refresh') || '0', 10);
+      const now = Date.now();
+      
+      if (now - lastRefresh > REFRESH_INTERVAL) {
+        // 10+ minutes passed - trigger backend refresh first
+        try {
+          await fetch(`${API_BASE_URL}/refresh`, { method: 'POST' });
+          localStorage.setItem('portfolio_last_refresh', now.toString());
+        } catch (e) {
+          console.error('Auto-refresh failed');
+        }
+      }
+      
+      fetchHoldings();
+    };
+    
+    checkAndFetch();
 
     // Click outside to close standard autocomplete dropdown
     function handleClickOutside(event: MouseEvent) {
@@ -167,7 +187,7 @@ export default function Home() {
       // Fetch Price
       setFetchingPrice(true);
       try {
-        const res = await fetch(`http://141.144.249.56:8000/price/${stockSymbol}`);
+        const res = await fetch(`${API_BASE_URL}/price/${stockSymbol}`);
         if (res.ok) {
             const data = await res.json();
             if (data.price) {
@@ -200,7 +220,7 @@ export default function Home() {
       setError('');
       
       try {
-        const res = await fetch('http://141.144.249.56:8000/holdings', {
+        const res = await fetch(`${API_BASE_URL}/holdings`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
@@ -257,7 +277,7 @@ export default function Home() {
       const payloadQuantity = isMetal ? finalQuantity / OZ_TO_GRAM : finalQuantity;
       const payloadUnitCost = isMetal ? parseFloat(cost) * OZ_TO_GRAM : parseFloat(cost);
 
-      const res = await fetch('http://141.144.249.56:8000/holdings', {
+      const res = await fetch(`${API_BASE_URL}/holdings`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -296,7 +316,7 @@ export default function Home() {
       setIsRefreshing(true);
       try {
           // Trigger backend refresh
-          await fetch('http://141.144.249.56:8000/refresh', { method: 'POST' });
+          await fetch(`${API_BASE_URL}/refresh`, { method: 'POST' });
           // Fetch updated holdings
           await fetchHoldings();
           setLastUpdated(new Date());
@@ -311,7 +331,7 @@ export default function Home() {
     if (!confirm("Are you sure you want to delete this holding?")) return;
 
     try {
-        const res = await fetch(`http://141.144.249.56:8000/holdings/${id}`, {
+        const res = await fetch(`${API_BASE_URL}/holdings/${id}`, {
             method: 'DELETE',
         });
         if (!res.ok) throw new Error('Failed to delete');
@@ -359,7 +379,7 @@ export default function Home() {
     }
 
     try {
-      const res = await fetch(`http://141.144.249.56:8000/holdings/${reduceHolding.id}/reduce`, {
+      const res = await fetch(`${API_BASE_URL}/holdings/${reduceHolding.id}/reduce`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ quantity: qty })
@@ -398,7 +418,7 @@ export default function Home() {
     }
 
     try {
-      const res = await fetch(`http://141.144.249.56:8000/holdings/${editHolding.id}/update-cost`, {
+      const res = await fetch(`${API_BASE_URL}/holdings/${editHolding.id}/update-cost`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ average_cost: newCost })
