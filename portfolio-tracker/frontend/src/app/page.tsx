@@ -147,7 +147,7 @@ export default function Home() {
   useEffect(() => {
     // Auto-refresh logic: Only refresh if 10+ minutes since last refresh
     const checkAndFetch = async () => {
-      const REFRESH_INTERVAL = 1 * 30 * 1000; // 10 minutes in ms
+      const REFRESH_INTERVAL = 60 * 60 * 1000; // 10 minutes in ms
       const lastRefresh = parseInt(localStorage.getItem('portfolio_last_refresh') || '0', 10);
       const now = Date.now();
       
