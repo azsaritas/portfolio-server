@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef, Fragment, useMemo } from 'react';
-import { Plus, Minus, RefreshCw, TrendingUp, Search, Wallet, ArrowUpRight, ArrowDownRight, Trash2, X, PieChart as PieChartIcon, ChevronDown, ChevronRight, ArrowUp, ArrowDown, Pencil, MoreVertical } from 'lucide-react';
+import { Plus, Minus, RefreshCw, TrendingUp, TrendingDown, Search, Wallet, ArrowUpRight, ArrowDownRight, Trash2, X, PieChart as PieChartIcon, ChevronDown, ChevronRight, ArrowUp, ArrowDown, Pencil, MoreVertical } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Sector } from 'recharts';
 import { BIST_STOCKS } from '@/data/bist_stocks';
 import { CRYPTO_COINS } from '@/data/crypto_coins';
@@ -601,30 +601,30 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen bg-gray-950 text-gray-100 p-8 font-sans relative">
-      <div className="max-w-6xl mx-auto space-y-8">
+    <main className="min-h-screen bg-gray-950 text-gray-100 p-4 md:p-8 font-sans relative">
+      <div className="max-w-6xl mx-auto space-y-6 md:space-y-8">
         
         {/* Header & Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
             {/* Title Card */}
             <div className="md:col-span-1 flex flex-col justify-center space-y-2">
                 <div className="flex items-center justify-between mb-4">
                      <div className="flex items-center space-x-3">
                         <div className="p-3 bg-blue-600 rounded-xl shadow-lg shadow-blue-900/20">
-                        <Wallet className="w-8 h-8 text-white" />
+                        <Wallet className="w-6 h-6 md:w-8 md:h-8 text-white" />
                         </div>
                         <div>
-                        <h1 className="text-3xl font-bold tracking-tight">My Portfolio</h1>
-                        <p className="text-gray-400 text-sm">Track your BIST investments</p>
+                        <h1 className="text-2xl md:text-3xl font-bold tracking-tight">My Portfolio</h1>
+                        <p className="text-gray-400 text-xs md:text-sm">Track your BIST investments</p>
                         </div>
                     </div>
                 </div>
                 
                 <button 
                     onClick={() => setIsModalOpen(true)}
-                    className="w-full py-4 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 rounded-2xl font-bold text-white shadow-lg shadow-blue-900/30 transition-all active:scale-95 flex items-center justify-center text-lg space-x-2 border border-blue-400/20"
+                    className="w-full py-3 md:py-4 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 rounded-2xl font-bold text-white shadow-lg shadow-blue-900/30 transition-all active:scale-95 flex items-center justify-center text-base md:text-lg space-x-2 border border-blue-400/20"
                 >
-                    <Plus className="w-6 h-6" />
+                    <Plus className="w-5 h-5 md:w-6 md:h-6" />
                     <span>Add New Transaction</span>
                 </button>
             </div>
@@ -632,13 +632,13 @@ export default function Home() {
             {/* Total Balance Card */}
             <div 
                 onClick={() => setActiveTotalModal('VALUE')}
-                className="bg-gray-900/50 p-6 rounded-2xl border border-gray-800 shadow-xl backdrop-blur-sm cursor-pointer hover:bg-gray-800 transition-all group"
+                className="bg-gray-900/50 p-5 md:p-6 rounded-2xl border border-gray-800 shadow-xl backdrop-blur-sm cursor-pointer hover:bg-gray-800 transition-all group"
             >
                 <div className="flex items-center justify-between mb-2">
-                     <p className="text-gray-400 text-sm font-medium uppercase tracking-wider group-hover:text-blue-400 transition-colors">Total Portfolio Value</p>
-                     <TrendingUp className="w-6 h-6 text-gray-700 group-hover:text-blue-500 transition-colors" />
+                     <p className="text-gray-400 text-xs md:text-sm font-medium uppercase tracking-wider group-hover:text-blue-400 transition-colors">Total Portfolio Value</p>
+                     <TrendingUp className="w-5 h-5 md:w-6 md:h-6 text-gray-700 group-hover:text-blue-500 transition-colors" />
                 </div>
-                <h2 className="text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400">
+                <h2 className="text-3xl md:text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400 flex items-baseline">
                     ₺{totalPortfolioValue.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </h2>
             </div>
@@ -650,7 +650,7 @@ export default function Home() {
             >
                  <p className="text-gray-400 text-sm font-medium uppercase tracking-wider mb-1 group-hover:text-blue-400 transition-colors">Total Profit / Loss</p>
                  <div className="flex items-baseline space-x-3">
-                    <h2 className={`text-4xl font-bold ${totalProfitLoss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    <h2 className={`text-3xl md:text-4xl font-bold ${totalProfitLoss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                         {totalProfitLoss >= 0 ? '+' : '-'}₺{Math.abs(totalProfitLoss).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </h2>
                     <div className={`flex items-center text-sm font-bold px-2 py-1 rounded-full ${totalProfitLossPct >= 0 ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
@@ -1021,7 +1021,7 @@ export default function Home() {
                 <div className="bg-gray-900 w-full max-w-lg rounded-3xl border border-gray-800 shadow-2xl overflow-hidden relative animate-in fade-in zoom-in duration-200">
                     
                     {/* Modal Header */}
-                    <div className="p-6 border-b border-gray-800 flex justify-between items-center bg-gray-900/50">
+                    <div className="p-4 md:p-6 border-b border-gray-800 flex justify-between items-center bg-gray-900/50">
                         <h2 className="text-xl font-bold text-white flex items-center">
                             <Plus className="w-5 h-5 mr-3 text-blue-500" />
                             Add Transaction
@@ -1035,7 +1035,7 @@ export default function Home() {
                     </div>
 
                     {/* Category Tabs */}
-                    <div className="flex p-1 bg-gray-800 rounded-xl mb-6">
+                    <div className="flex p-1 bg-gray-800 rounded-xl mx-4 md:mx-6 mt-4 mb-2">
                         {(['BIST', 'Crypto', 'Funds', 'Metals', 'Cash'] as const).map((cat) => (
                             <button
                                 key={cat}
@@ -1055,7 +1055,7 @@ export default function Home() {
                     </div>
 
                     {/* Modal Body */}
-                    <div className="p-6">
+                    <div className="p-4 md:p-6 pt-2">
                          <form onSubmit={handleAddHolding} className="space-y-6">
                             
                             {/* Cash Category - Simple Form */}
@@ -1293,7 +1293,7 @@ export default function Home() {
               </div>
           </div>
           
-          <div className="overflow-x-auto">
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left">
               <thead className="bg-gray-900 border-b border-gray-800">
                 <tr>
@@ -1473,6 +1473,138 @@ export default function Home() {
                 )}
               </tbody>
             </table>
+          </div>
+
+          {/* Mobile Card View */}
+          <div className="md:hidden space-y-4 mt-4">
+             {holdings.length === 0 ? (
+               <div className="text-center py-12 text-gray-500 bg-gray-900/50 rounded-2xl border border-gray-800 border-dashed">
+                  <div className="flex justify-center mb-3">
+                      <Wallet className="w-12 h-12 opacity-20" />
+                  </div>
+                  <p>No transactions yet</p>
+               </div>
+             ) : (
+                Object.entries(groupedHoldings).map(([group, groupItems]) => {
+                    const isExpanded = expandedGroups[group];
+                    // Calculate group total PL for header
+                    const groupTotal = groupItems.reduce((acc, curr) => ({
+                         totalVal: acc.totalVal + curr.total_value_try,
+                         totalPL: acc.totalPL + curr.profit_loss_try
+                    }), { totalVal: 0, totalPL: 0 });
+
+                    return (
+                        <div key={group} className="space-y-2">
+                             {/* Group Header */}
+                             <div 
+                                onClick={() => toggleGroup(group)}
+                                className="flex items-center justify-between p-3 bg-gray-900/80 border border-gray-800 rounded-xl cursor-pointer active:scale-[0.99] transition-transform"
+                             >
+                                <div className="flex items-center space-x-2">
+                                    {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
+                                    <span className="font-bold text-gray-200">{group}</span>
+                                    <span className="text-xs px-2 py-0.5 bg-gray-800 rounded-full text-gray-500">{groupItems.length}</span>
+                                </div>
+                                <div className={`text-sm font-bold ${groupTotal.totalPL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                    {groupTotal.totalPL >= 0 ? '+' : ''}₺{groupTotal.totalPL.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                                </div>
+                             </div>
+
+                             {isExpanded && groupItems.map(h => {
+                                 const isHoldingMetal = ['GC=F', 'SI=F', 'PL=F', 'PA=F', 'HG=F'].includes(h.symbol) || h.symbol.endsWith('=F') || h.symbol.endsWith('=X');
+                                 const displayQuantity = isHoldingMetal ? h.quantity * OZ_TO_GRAM : h.quantity;
+                                 const displayAvgCost = isHoldingMetal ? h.average_cost / OZ_TO_GRAM : h.average_cost;
+                                 const displayCurrentPrice = isHoldingMetal ? h.current_price / OZ_TO_GRAM : h.current_price;
+
+                                 return (
+                                     <div key={h.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4 relative overflow-hidden">
+                                         {/* Top Row: Symbol & Actions */}
+                                         <div className="flex justify-between items-start mb-3">
+                                             <div>
+                                                 <div className="font-bold text-blue-400 text-lg">{h.symbol}</div>
+                                                 <div className="text-xs text-gray-500 truncate max-w-[200px]">{h.name}</div>
+                                             </div>
+                                             <div className="relative">
+                                                 <button 
+                                                    onClick={() => setOpenActionMenu(openActionMenu === h.id ? null : h.id)}
+                                                    className="p-2 bg-gray-800 hover:bg-gray-700 text-gray-400 rounded-lg transition-colors"
+                                                 >
+                                                    <MoreVertical className="w-4 h-4" />
+                                                 </button>
+                                                 {/* Dropdown Menu */}
+                                                 {openActionMenu === h.id && (
+                                                    <div className="absolute right-0 top-10 w-48 bg-gray-800 border border-gray-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+                                                        <button onClick={() => { handleQuickAdd(h); setOpenActionMenu(null); }} className="w-full px-4 py-3 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center space-x-3 border-b border-gray-700/50 active:bg-gray-600">
+                                                            <Plus className="w-4 h-4 text-green-400" /> <span>Ekle</span>
+                                                        </button>
+                                                        <button onClick={() => { handleOpenReduceModal(h); setOpenActionMenu(null); }} className="w-full px-4 py-3 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center space-x-3 border-b border-gray-700/50 active:bg-gray-600">
+                                                            <Minus className="w-4 h-4 text-yellow-400" /> <span>Azalt</span>
+                                                        </button>
+                                                        <button onClick={() => { handleOpenEditModal(h); setOpenActionMenu(null); }} className="w-full px-4 py-3 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center space-x-3 border-b border-gray-700/50 active:bg-gray-600">
+                                                            <Pencil className="w-4 h-4 text-blue-400" /> <span>Düzenle</span>
+                                                        </button>
+                                                        <button onClick={() => { handleDelete(h.id); setOpenActionMenu(null); }} className="w-full px-4 py-3 text-left text-sm text-red-300 hover:bg-red-900/20 flex items-center space-x-3 active:bg-red-900/30">
+                                                            <Trash2 className="w-4 h-4 text-red-400" /> <span>Sil</span>
+                                                        </button>
+                                                    </div>
+                                                 )}
+                                             </div>
+                                         </div>
+
+                                         {/* Stats Grid */}
+                                         <div className="grid grid-cols-2 gap-4 mb-3">
+                                             <div>
+                                                 <div className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Quantity</div>
+                                                 <div className="font-mono text-white text-sm">
+                                                     {isHoldingMetal ? `${displayQuantity.toFixed(2)} g` : (h.currency === 'USD' ? Number(displayQuantity.toFixed(8)) : displayQuantity)}
+                                                 </div>
+                                             </div>
+                                             <div className="text-right">
+                                                 <div className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Avg Cost</div>
+                                                 <div className="font-mono text-gray-300 text-sm">
+                                                    {h.currency === 'USD' ? '$' : '₺'}{displayAvgCost.toFixed(2)}
+                                                 </div>
+                                             </div>
+                                             <div>
+                                                 <div className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Current</div>
+                                                 <div className="font-mono text-gray-200 text-sm">
+                                                    {h.currency === 'USD' ? '$' : '₺'}{displayCurrentPrice.toFixed(2)}
+                                                 </div>
+                                                 <div className={`text-xs font-bold ${h.daily_change_pct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                                    {h.daily_change_pct >= 0 ? '+' : ''}{h.daily_change_pct.toFixed(2)}%
+                                                 </div>
+                                             </div>
+                                             <div className="text-right">
+                                                  <div className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Total Value</div>
+                                                  <div className="font-mono font-bold text-white text-sm">
+                                                      {h.currency === 'USD' ? '$' : h.currency === 'EUR' ? '€' : h.currency === 'GBP' ? '£' : '₺'}{h.total_value.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                  </div>
+                                                  {h.currency !== 'TRY' && (
+                                                      <div className="text-[10px] text-gray-400">≈₺{h.total_value_try.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</div>
+                                                  )}
+                                             </div>
+                                         </div>
+                                         
+                                         {/* Footer: Profit/Loss */}
+                                         <div className={`pt-3 border-t border-gray-800 flex justify-between items-center ${h.profit_loss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                              <span className="text-[10px] font-bold uppercase opacity-70 tracking-wider">Total P/L</span>
+                                              <div className="text-right flex flex-col items-end">
+                                                  <span className="font-bold flex items-center space-x-1 text-sm">
+                                                     {h.profit_loss >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                                                     <span>{h.profit_loss >= 0 ? '+' : ''}{h.currency === 'USD' ? '$' : '₺'}{h.profit_loss.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                  </span>
+                                                  <span className={`text-[10px] font-bold ${h.profit_loss_pct >= 0 ? 'text-green-500/70' : 'text-red-500/70'}`}>
+                                                      {h.profit_loss_pct.toFixed(2)}%
+                                                  </span>
+                                              </div>
+                                         </div>
+                                     </div>
+                                 );
+                             })}
+                        </div>
+                    );
+                })
+             )}
           </div>
         </div>
       </div>
