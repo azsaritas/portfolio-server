@@ -1,0 +1,22 @@
+export const CRYPTO_COINS = [
+  { symbol: "BTC-USD", name: "Bitcoin / USD" },
+  { symbol: "ETH-USD", name: "Ethereum / USD" },
+  { symbol: "USDT-USD", name: "Tether / USD" },
+  { symbol: "SOL-USD", name: "Solana / USD" },
+  { symbol: "BNB-USD", name: "Binance Coin / USD" },
+  { symbol: "AVAX-USD", name: "Avalanche / USD" },
+  { symbol: "XRP-USD", name: "Ripple / USD" },
+  { symbol: "DOGE-USD", name: "Dogecoin / USD" },
+  { symbol: "ADA-USD", name: "Cardano / USD" },
+  { symbol: "SHIB-USD", name: "Shiba Inu / USD" },
+  { symbol: "MATIC-USD", name: "Polygon / USD" },
+  { symbol: "DOT-USD", name: "Polkadot / USD" },
+  { symbol: "LTC-USD", name: "Litecoin / USD" },
+  { symbol: "TRX-USD", name: "Tron / USD" },
+  { symbol: "ATOM-USD", name: "Cosmos / USD" },
+  { symbol: "LINK-USD", name: "Chainlink / USD" },
+  { symbol: "XLM-USD", name: "Stellar / USD" },
+  { symbol: "NEAR-USD", name: "Near Protocol / USD" },
+  { symbol: "ALGO-USD", name: "Algorand / USD" },
+  { symbol: "FTM-USD", name: "Fantom / USD" }
+];
