@@ -101,7 +101,7 @@ export default function Home() {
   const fetchHoldings = async () => {
     setLoading(true);
     try {
-      const res = await fetch('http://localhost:8000/holdings');
+      const res = await fetch('http://141.144.249.56:8000/holdings');
       if (!res.ok) throw new Error('Failed to fetch holdings');
       const data = await res.json();
       setHoldings(data);
@@ -126,14 +126,14 @@ export default function Home() {
 
   const fetchHistory = async () => {
       try {
-          const res = await fetch('http://localhost:8000/portfolio/history');
+          const res = await fetch('http://141.144.249.56:8000/portfolio/history');
           if (res.ok) {
               const data = await res.json();
               setHistoryData(data);
           }
           
           // Fetch Stats
-          const statsRes = await fetch('http://localhost:8000/portfolio/stats');
+          const statsRes = await fetch('http://141.144.249.56:8000/portfolio/stats');
           if (statsRes.ok) {
               const statsData = await statsRes.json();
               setPortfolioStats(statsData);
@@ -167,7 +167,7 @@ export default function Home() {
       // Fetch Price
       setFetchingPrice(true);
       try {
-        const res = await fetch(`http://localhost:8000/price/${stockSymbol}`);
+        const res = await fetch(`http://141.144.249.56:8000/price/${stockSymbol}`);
         if (res.ok) {
             const data = await res.json();
             if (data.price) {
@@ -200,7 +200,7 @@ export default function Home() {
       setError('');
       
       try {
-        const res = await fetch('http://localhost:8000/holdings', {
+        const res = await fetch('http://141.144.249.56:8000/holdings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
@@ -257,7 +257,7 @@ export default function Home() {
       const payloadQuantity = isMetal ? finalQuantity / OZ_TO_GRAM : finalQuantity;
       const payloadUnitCost = isMetal ? parseFloat(cost) * OZ_TO_GRAM : parseFloat(cost);
 
-      const res = await fetch('http://localhost:8000/holdings', {
+      const res = await fetch('http://141.144.249.56:8000/holdings', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -296,7 +296,7 @@ export default function Home() {
       setIsRefreshing(true);
       try {
           // Trigger backend refresh
-          await fetch('http://localhost:8000/refresh', { method: 'POST' });
+          await fetch('http://141.144.249.56:8000/refresh', { method: 'POST' });
           // Fetch updated holdings
           await fetchHoldings();
           setLastUpdated(new Date());
@@ -311,7 +311,7 @@ export default function Home() {
     if (!confirm("Are you sure you want to delete this holding?")) return;
 
     try {
-        const res = await fetch(`http://localhost:8000/holdings/${id}`, {
+        const res = await fetch(`http://141.144.249.56:8000/holdings/${id}`, {
             method: 'DELETE',
         });
         if (!res.ok) throw new Error('Failed to delete');
@@ -359,7 +359,7 @@ export default function Home() {
     }
 
     try {
-      const res = await fetch(`http://localhost:8000/holdings/${reduceHolding.id}/reduce`, {
+      const res = await fetch(`http://141.144.249.56:8000/holdings/${reduceHolding.id}/reduce`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ quantity: qty })
@@ -398,7 +398,7 @@ export default function Home() {
     }
 
     try {
-      const res = await fetch(`http://localhost:8000/holdings/${editHolding.id}/update-cost`, {
+      const res = await fetch(`http://141.144.249.56:8000/holdings/${editHolding.id}/update-cost`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ average_cost: newCost })
