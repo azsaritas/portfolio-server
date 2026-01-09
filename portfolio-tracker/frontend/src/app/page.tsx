@@ -1,7 +1,9 @@
 "use client"
 
 import { useState, useEffect, useRef, Fragment, useMemo } from 'react';
-import { Plus, Minus, RefreshCw, TrendingUp, TrendingDown, Search, Wallet, ArrowUpRight, ArrowDownRight, Trash2, X, PieChart as PieChartIcon, ChevronDown, ChevronRight, ArrowUp, ArrowDown, Pencil, MoreVertical } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Plus, Minus, RefreshCw, TrendingUp, TrendingDown, Search, Wallet, ArrowUpRight, ArrowDownRight, Trash2, X, PieChart as PieChartIcon, ChevronDown, ChevronRight, ArrowUp, ArrowDown, Pencil, MoreVertical, LogOut, User, LogIn, AlertCircle } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Sector } from 'recharts';
 import { BIST_STOCKS } from '@/data/bist_stocks';
 import { CRYPTO_COINS } from '@/data/crypto_coins';
@@ -38,6 +40,45 @@ interface Holding {
 }
 
 export default function Home() {
+  const router = useRouter();
+  const { isAuthenticated, isLoading: authLoading, user, logout, accessToken } = useAuth();
+  
+  // Guest mode state - store holdings locally when not authenticated
+  const [guestHoldings, setGuestHoldings] = useState<Holding[]>([]);
+  const [showGuestWarning, setShowGuestWarning] = useState(false);
+  
+  // Load guest holdings from localStorage on mount
+  useEffect(() => {
+    if (!isAuthenticated) {
+      const stored = localStorage.getItem('guest_holdings');
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          setGuestHoldings(parsed);
+          setHoldings(parsed);
+        } catch (e) {
+          console.error('Failed to parse guest holdings');
+        }
+      }
+      // Show warning if there are unsaved holdings
+      setShowGuestWarning(true);
+    }
+  }, [isAuthenticated]);
+  
+  // Warn user before leaving with unsaved guest data
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!isAuthenticated && guestHoldings.length > 0) {
+        e.preventDefault();
+        e.returnValue = 'Kayıt olmadan çıkarsanız tüm verileriniz silinecek!';
+        return e.returnValue;
+      }
+    };
+    
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isAuthenticated, guestHoldings]);
+
   const [holdings, setHoldings] = useState<Holding[]>([]);
   
   // Modal State
@@ -99,10 +140,135 @@ export default function Home() {
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState('');
 
+  // Guest mode helper: Add holding to localStorage
+  const addGuestHolding = (newHolding: any) => {
+    // Check for existing holding with same symbol
+    const existingIndex = guestHoldings.findIndex(h => h.symbol === newHolding.symbol);
+    
+    // Determine currency
+    let currency = 'TRY';
+    if (newHolding.symbol.endsWith('USD') || ['GC=F', 'SI=F', 'PL=F', 'PA=F', 'HG=F'].includes(newHolding.symbol) || newHolding.symbol.endsWith('=F')) {
+         currency = 'USD';
+    }
+
+    let updated;
+    if (existingIndex >= 0) {
+        // Merge with existing
+        const existing = guestHoldings[existingIndex];
+        const totalQty = existing.quantity + newHolding.quantity;
+        const totalCostBase = (existing.quantity * existing.average_cost) + (newHolding.quantity * newHolding.average_cost);
+        const newAvgCost = totalCostBase / totalQty;
+        
+        // Use new current price if available, otherwise keep old or fallback
+        const currentPrice = newHolding.current_price || existing.current_price || newAvgCost;
+        const totalValue = totalQty * currentPrice;
+        const profitLoss = totalValue - totalCostBase;
+        const profitLossPct = totalCostBase > 0 ? (profitLoss / totalCostBase) * 100 : 0;
+
+        const merged = {
+            ...existing,
+            quantity: totalQty,
+            average_cost: newAvgCost,
+            current_price: currentPrice,
+            total_value: totalValue,
+            profit_loss: profitLoss,
+            profit_loss_pct: profitLossPct,
+            daily_change_pct: 0, // Reset or keep? Keep 0 for guest for now
+            total_value_try: currency === 'TRY' ? totalValue : 0, // Approx
+            profit_loss_try: currency === 'TRY' ? profitLoss : 0,
+        };
+        
+        updated = [...guestHoldings];
+        updated[existingIndex] = merged;
+    } else {
+        // Add New
+        const guestId = Date.now();
+        const currentPrice = newHolding.current_price || newHolding.average_cost || 0;
+        const totalCost = newHolding.quantity * newHolding.average_cost;
+        const totalValue = newHolding.quantity * currentPrice;
+        const profitLoss = totalValue - totalCost;
+        const profitLossPct = totalCost > 0 ? (profitLoss / totalCost) * 100 : 0;
+
+        const holdingWithId = {
+            ...newHolding,
+            id: guestId,
+            name: newHolding.symbol,
+            created_at: new Date().toISOString(),
+            current_price: currentPrice,
+            daily_change_pct: 0,
+            profit_loss: profitLoss,
+            profit_loss_pct: profitLossPct,
+            total_value: totalValue,
+            currency: currency,
+            total_value_try: currency === 'TRY' ? totalValue : 0,
+            profit_loss_try: currency === 'TRY' ? profitLoss : 0,
+        };
+        updated = [...guestHoldings, holdingWithId];
+    }
+    
+    setGuestHoldings(updated);
+    setHoldings(updated);
+    localStorage.setItem('guest_holdings', JSON.stringify(updated));
+  };
+
+  // Guest mode helper: Remove holding from localStorage
+  const removeGuestHolding = (holdingId: number) => {
+    const updated = guestHoldings.filter(h => h.id !== holdingId);
+    setGuestHoldings(updated);
+    setHoldings(updated);
+    localStorage.setItem('guest_holdings', JSON.stringify(updated));
+  };
+
+  // Sync guest holdings to backend when user logs in
+  useEffect(() => {
+    const syncGuestHoldings = async () => {
+      if (isAuthenticated && accessToken && guestHoldings.length > 0) {
+        try {
+          // Sync each guest holding to backend
+          for (const holding of guestHoldings) {
+            await fetch(`${API_BASE_URL}/holdings`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${accessToken}`
+              },
+              body: JSON.stringify({
+                symbol: holding.symbol,
+                quantity: holding.quantity,
+                unit_cost: holding.average_cost || 1
+              }),
+            });
+          }
+          // Clear guest holdings after sync
+          setGuestHoldings([]);
+          localStorage.removeItem('guest_holdings');
+          setShowGuestWarning(false);
+          // Refresh holdings from backend
+          fetchHoldings();
+        } catch (err) {
+          console.error('Failed to sync guest holdings:', err);
+        }
+      }
+    };
+    
+    syncGuestHoldings();
+  }, [isAuthenticated, accessToken]);
+
+
   const fetchHoldings = async () => {
+    // For guest users, use local holdings
+    if (!isAuthenticated || !accessToken) {
+      setHoldings(guestHoldings);
+      setLoading(false);
+      return;
+    }
+    
+    // For authenticated users, fetch from API
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/holdings`);
+      const res = await fetch(`${API_BASE_URL}/holdings`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
       if (!res.ok) throw new Error('Failed to fetch holdings');
       const data = await res.json();
       setHoldings(data);
@@ -126,15 +292,20 @@ export default function Home() {
   const [chartPeriod, setChartPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
 
   const fetchHistory = async () => {
+      if (!accessToken) return;
       try {
-          const res = await fetch(`${API_BASE_URL}/portfolio/history`);
+          const res = await fetch(`${API_BASE_URL}/portfolio/history`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
           if (res.ok) {
               const data = await res.json();
               setHistoryData(data);
           }
           
           // Fetch Stats
-          const statsRes = await fetch(`${API_BASE_URL}/portfolio/stats`);
+          const statsRes = await fetch(`${API_BASE_URL}/portfolio/stats`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
           if (statsRes.ok) {
               const statsData = await statsRes.json();
               setPortfolioStats(statsData);
@@ -145,16 +316,20 @@ export default function Home() {
   };
 
   useEffect(() => {
-    // Auto-refresh logic: Only refresh if 10+ minutes since last refresh
+    // Auto-refresh logic: Only refresh if 1 hour since last refresh
     const checkAndFetch = async () => {
-      const REFRESH_INTERVAL = 60 * 60 * 1000; // 10 minutes in ms
+      if (!accessToken) return;
+      const REFRESH_INTERVAL = 60 * 60 * 1000; // 1 hour in ms
       const lastRefresh = parseInt(localStorage.getItem('portfolio_last_refresh') || '0', 10);
       const now = Date.now();
       
       if (now - lastRefresh > REFRESH_INTERVAL) {
-        // 10+ minutes passed - trigger backend refresh first
+        // 1 hour passed - trigger backend refresh first
         try {
-          await fetch(`${API_BASE_URL}/refresh`, { method: 'POST' });
+          await fetch(`${API_BASE_URL}/refresh`, { 
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
           localStorage.setItem('portfolio_last_refresh', now.toString());
         } catch (e) {
           console.error('Auto-refresh failed');
@@ -176,7 +351,7 @@ export default function Home() {
     return () => {
         document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, []);
+  }, [accessToken]);
 
 
 
@@ -220,9 +395,29 @@ export default function Home() {
       setError('');
       
       try {
+        // Guest mode: save to localStorage
+        if (!isAuthenticated) {
+          addGuestHolding({
+            symbol: symbol,
+            quantity: cashAmount,
+            average_cost: 1,
+            current_value: cashAmount,
+            total_cost: cashAmount,
+          });
+          setSymbol('');
+          setQuantity('');
+          setIsModalOpen(false);
+          setAdding(false);
+          return;
+        }
+        
+        // Authenticated: save to backend
         const res = await fetch(`${API_BASE_URL}/holdings`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`
+          },
           body: JSON.stringify({ 
             symbol: symbol,
             quantity: cashAmount,
@@ -277,10 +472,33 @@ export default function Home() {
       const payloadQuantity = isMetal ? finalQuantity / OZ_TO_GRAM : finalQuantity;
       const payloadUnitCost = isMetal ? parseFloat(cost) * OZ_TO_GRAM : parseFloat(cost);
 
+      // Guest mode: save to localStorage
+      if (!isAuthenticated) {
+        addGuestHolding({
+          symbol: symbol,
+          quantity: payloadQuantity,
+          average_cost: payloadUnitCost,
+          current_price: (currentPrice > 0 ? (isMetal ? currentPrice * OZ_TO_GRAM : currentPrice) : payloadUnitCost),
+          current_value: payloadQuantity * payloadUnitCost,
+          total_cost: payloadQuantity * payloadUnitCost,
+        });
+        // Reset Form
+        setSymbol('');
+        setQuantity('');
+        setAmount('');
+        setCost('');
+        setCurrentPrice(0);
+        setIsModalOpen(false);
+        setAdding(false);
+        return;
+      }
+
+      // Authenticated: save to backend
       const res = await fetch(`${API_BASE_URL}/holdings`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
         },
         body: JSON.stringify({ 
             symbol,
@@ -315,8 +533,15 @@ export default function Home() {
   const handleRefresh = async () => {
       setIsRefreshing(true);
       try {
-          // Trigger backend refresh
-          await fetch(`${API_BASE_URL}/refresh`, { method: 'POST' });
+      // Trigger backend refresh
+      if (isAuthenticated && accessToken) {
+          await fetch(`${API_BASE_URL}/refresh`, { 
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+      }
+          // Store last refresh time
+          localStorage.setItem('portfolio_last_refresh', Date.now().toString());
           // Fetch updated holdings
           await fetchHoldings();
           setLastUpdated(new Date());
@@ -327,12 +552,28 @@ export default function Home() {
       }
   };
 
+  // Guest mode helper: Update holding in localStorage
+  const updateGuestHolding = (id: number, updates: Partial<Holding>) => {
+    const updated = guestHoldings.map(h => 
+      h.id === id ? { ...h, ...updates } : h
+    );
+    setGuestHoldings(updated);
+    setHoldings(updated);
+    localStorage.setItem('guest_holdings', JSON.stringify(updated));
+  };
+
   const handleDelete = async (id: number) => {
     if (!confirm("Are you sure you want to delete this holding?")) return;
+
+    if (!isAuthenticated) {
+      removeGuestHolding(id);
+      return;
+    }
 
     try {
         const res = await fetch(`${API_BASE_URL}/holdings/${id}`, {
             method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${accessToken}` }
         });
         if (!res.ok) throw new Error('Failed to delete');
         fetchHoldings();
@@ -378,10 +619,34 @@ export default function Home() {
       return;
     }
 
+    if (!isAuthenticated) {
+      const newQuantity = reduceHolding.quantity - qty;
+      const newCurrentValue = newQuantity * reduceHolding.current_price;
+      const newTotalCost = newQuantity * reduceHolding.average_cost;
+      
+      if (newQuantity <= 0) {
+        removeGuestHolding(reduceHolding.id);
+      } else {
+        updateGuestHolding(reduceHolding.id, {
+          quantity: newQuantity,
+          total_value: newCurrentValue,
+          total_value_try: reduceHolding.currency === 'USD' ? newCurrentValue * 30 : newCurrentValue, // Approx for now, will refresh
+        });
+      }
+      
+      setIsReduceModalOpen(false);
+      setReduceHolding(null);
+      setReduceQuantity('');
+      return;
+    }
+
     try {
       const res = await fetch(`${API_BASE_URL}/holdings/${reduceHolding.id}/reduce`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
         body: JSON.stringify({ quantity: qty })
       });
       
@@ -417,10 +682,25 @@ export default function Home() {
       return;
     }
 
+    if (!isAuthenticated) {
+      updateGuestHolding(editHolding.id, {
+        average_cost: newCost,
+        // Recalculate derivative values if needed, though most are dynamic or on refresh
+      });
+      
+      setIsEditModalOpen(false);
+      setEditHolding(null);
+      setEditCost('');
+      return;
+    }
+
     try {
       const res = await fetch(`${API_BASE_URL}/holdings/${editHolding.id}/update-cost`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
         body: JSON.stringify({ average_cost: newCost })
       });
       
@@ -438,8 +718,8 @@ export default function Home() {
     }
   };
 
-  const totalPortfolioValue = holdings.reduce((acc, h) => acc + h.total_value_try, 0);
-  const totalProfitLoss = holdings.reduce((acc, h) => acc + h.profit_loss_try, 0);
+  const totalPortfolioValue = holdings.reduce((acc, h) => acc + (h.total_value_try || 0), 0);
+  const totalProfitLoss = holdings.reduce((acc, h) => acc + (h.profit_loss_try || 0), 0);
   const totalPortfolioCost = totalPortfolioValue - totalProfitLoss; // Derived back for Percentage calculation
   const totalProfitLossPct = totalPortfolioCost > 0 ? (totalProfitLoss / totalPortfolioCost) * 100 : 0;
   
@@ -600,6 +880,18 @@ export default function Home() {
     );
   };
 
+  // Show loading spinner while auth is checking
+  if (authLoading) {
+    return (
+      <main className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <div className="flex flex-col items-center space-y-4">
+          <RefreshCw className="w-12 h-12 text-blue-500 animate-spin" />
+          <p className="text-gray-400">Loading...</p>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-gray-950 text-gray-100 p-4 md:p-8 font-sans relative">
       <div className="max-w-6xl mx-auto space-y-6 md:space-y-8">
@@ -618,7 +910,50 @@ export default function Home() {
                         <p className="text-gray-400 text-xs md:text-sm">Track your BIST investments</p>
                         </div>
                     </div>
+                    {/* User Badge & Logout */}
+                    <div className="flex items-center space-x-2">
+                        {user ? (
+                            <>
+                                <div className="hidden md:flex items-center space-x-2 px-3 py-1.5 bg-gray-800/50 rounded-full border border-gray-700">
+                                    <User className="w-4 h-4 text-gray-400" />
+                                    <span className="text-xs text-gray-300 max-w-[120px] truncate">{user.email}</span>
+                                </div>
+                                <button
+                                    onClick={logout}
+                                    className="p-2 bg-gray-800 hover:bg-red-500/20 rounded-xl text-gray-400 hover:text-red-400 transition-colors"
+                                    title="Çıkış Yap"
+                                >
+                                    <LogOut className="w-5 h-5" />
+                                </button>
+                            </>
+                        ) : (
+                            <button
+                                onClick={() => router.push('/login')}
+                                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl text-white font-medium transition-colors flex items-center space-x-2"
+                            >
+                                <LogIn className="w-4 h-4" />
+                                <span className="text-sm">Giriş Yap</span>
+                            </button>
+                        )}
+                    </div>
                 </div>
+                
+                {/* Guest Mode Warning Banner */}
+                {!isAuthenticated && showGuestWarning && (
+                    <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-start space-x-3 text-amber-400">
+                        <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                            <p className="text-sm font-medium">Misafir Modu</p>
+                            <p className="text-xs text-amber-400/80 mt-0.5">
+                                Eklediğiniz varlıklar sadece bu tarayıcıda saklanır. 
+                                Kalıcı olarak kaydetmek için <button onClick={() => router.push('/login')} className="underline font-medium hover:text-amber-300">giriş yapın</button>.
+                            </p>
+                        </div>
+                        <button onClick={() => setShowGuestWarning(false)} className="text-amber-400/60 hover:text-amber-400">
+                            <X className="w-4 h-4" />
+                        </button>
+                    </div>
+                )}
                 
                 <button 
                     onClick={() => setIsModalOpen(true)}
@@ -1356,11 +1691,11 @@ export default function Home() {
                                     <div className="flex items-center space-x-6 text-sm">
                                         <div className="text-gray-300">
                                             <span className="text-gray-500 mr-2">Val:</span>
-                                            ₺{groupTotal?.totalValue.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                                            ₺{(groupTotal?.totalValue || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
                                         </div>
-                                        <div className={`${groupTotal?.totalPL && groupTotal.totalPL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                        <div className={`${(groupTotal?.totalPL || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                             <span className="text-gray-500 mr-2">P/L:</span>
-                                            {groupTotal?.totalPL && groupTotal.totalPL >= 0 ? '+' : ''}₺{groupTotal?.totalPL.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                                            {(groupTotal?.totalPL || 0) >= 0 ? '+' : ''}₺{(groupTotal?.totalPL || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
                                         </div>
                                     </div>
                                 </div>
@@ -1386,35 +1721,35 @@ export default function Home() {
                             </td>
                             <td className="px-6 py-5 text-right text-gray-300 font-mono">
                                 {isHoldingMetal 
-                                    ? `${displayQuantity.toFixed(2)} g` 
-                                    : (h.currency === 'USD' ? Number(displayQuantity.toFixed(8)) : displayQuantity)}
+                                    ? `${(displayQuantity || 0).toFixed(2)} g` 
+                                    : (h.currency === 'USD' ? Number((displayQuantity || 0).toFixed(8)) : displayQuantity)}
                             </td>
                             <td className="px-6 py-5 text-right text-gray-400 font-mono">
-                                {h.currency === 'USD' ? '$' : '₺'}{displayAvgCost.toFixed(2)}
+                                {h.currency === 'USD' ? '$' : '₺'}{(displayAvgCost || 0).toFixed(2)}
                             </td>
                             <td className="px-6 py-5 text-right font-mono">
                                 <div className="font-medium text-gray-200">
-                                    {h.currency === 'USD' ? '$' : '₺'}{displayCurrentPrice.toFixed(2)}
+                                    {h.currency === 'USD' ? '$' : '₺'}{(displayCurrentPrice || 0).toFixed(2)}
                                 </div>
-                                <div className={`text-xs font-semibold ${h.daily_change_pct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                    {h.daily_change_pct >= 0 ? '+' : ''}{h.daily_change_pct.toFixed(2)}%
+                                <div className={`text-xs font-semibold ${(h.daily_change_pct || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                    {(h.daily_change_pct || 0) >= 0 ? '+' : ''}{(h.daily_change_pct || 0).toFixed(2)}%
                                 </div>
                             </td>
                             <td className="px-6 py-5 text-right font-mono font-bold text-white">
                                 <div>
-                                    {h.currency === 'USD' ? '$' : h.currency === 'EUR' ? '€' : h.currency === 'GBP' ? '£' : '₺'}{h.total_value.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    {h.currency === 'USD' ? '$' : h.currency === 'EUR' ? '€' : h.currency === 'GBP' ? '£' : '₺'}{(h.total_value || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </div>
                                 {h.currency !== 'TRY' && (
                                     <div className="text-xs text-gray-400">
-                                        ≈₺{h.total_value_try.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        ≈₺{(h.total_value_try || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </div>
                                 )}
                             </td>
-                            <td className={`px-6 py-5 text-right font-mono font-bold ${h.profit_loss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            <td className={`px-6 py-5 text-right font-mono font-bold ${(h.profit_loss || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                 <div className="flex flex-col items-end">
-                                    <span>{h.profit_loss >= 0 ? '+' : ''}{h.currency === 'USD' ? '$' : '₺'}{h.profit_loss.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                    <span className={`text-xs ${h.profit_loss_pct >= 0 ? 'text-green-500/70' : 'text-red-500/70'}`}>
-                                        {h.profit_loss_pct.toFixed(2)}%
+                                    <span>{(h.profit_loss || 0) >= 0 ? '+' : ''}{h.currency === 'USD' ? '$' : '₺'}{(h.profit_loss || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                    <span className={`text-xs ${(h.profit_loss_pct || 0) >= 0 ? 'text-green-500/70' : 'text-red-500/70'}`}>
+                                        {(h.profit_loss_pct || 0).toFixed(2)}%
                                     </span>
                                 </div>
                             </td>
@@ -1505,8 +1840,8 @@ export default function Home() {
                                     <span className="font-bold text-gray-200">{group}</span>
                                     <span className="text-xs px-2 py-0.5 bg-gray-800 rounded-full text-gray-500">{groupItems.length}</span>
                                 </div>
-                                <div className={`text-sm font-bold ${groupTotal.totalPL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                    {groupTotal.totalPL >= 0 ? '+' : ''}₺{groupTotal.totalPL.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                                <div className={`text-sm font-bold ${(groupTotal.totalPL || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                    {(groupTotal.totalPL || 0) >= 0 ? '+' : ''}₺{(groupTotal.totalPL || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
                                 </div>
                              </div>
 
@@ -1556,45 +1891,45 @@ export default function Home() {
                                              <div>
                                                  <div className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Quantity</div>
                                                  <div className="font-mono text-white text-sm">
-                                                     {isHoldingMetal ? `${displayQuantity.toFixed(2)} g` : (h.currency === 'USD' ? Number(displayQuantity.toFixed(8)) : displayQuantity)}
+                                                     {isHoldingMetal ? `${(displayQuantity || 0).toFixed(2)} g` : (h.currency === 'USD' ? Number((displayQuantity || 0).toFixed(8)) : displayQuantity)}
                                                  </div>
                                              </div>
                                              <div className="text-right">
                                                  <div className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Avg Cost</div>
                                                  <div className="font-mono text-gray-300 text-sm">
-                                                    {h.currency === 'USD' ? '$' : '₺'}{displayAvgCost.toFixed(2)}
+                                                    {h.currency === 'USD' ? '$' : '₺'}{(displayAvgCost || 0).toFixed(2)}
                                                  </div>
                                              </div>
                                              <div>
                                                  <div className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Current</div>
                                                  <div className="font-mono text-gray-200 text-sm">
-                                                    {h.currency === 'USD' ? '$' : '₺'}{displayCurrentPrice.toFixed(2)}
+                                                    {h.currency === 'USD' ? '$' : '₺'}{(displayCurrentPrice || 0).toFixed(2)}
                                                  </div>
                                                  <div className={`text-xs font-bold ${h.daily_change_pct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                                    {h.daily_change_pct >= 0 ? '+' : ''}{h.daily_change_pct.toFixed(2)}%
+                                                    {(h.daily_change_pct || 0) >= 0 ? '+' : ''}{(h.daily_change_pct || 0).toFixed(2)}%
                                                  </div>
                                              </div>
                                              <div className="text-right">
                                                   <div className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Total Value</div>
                                                   <div className="font-mono font-bold text-white text-sm">
-                                                      {h.currency === 'USD' ? '$' : h.currency === 'EUR' ? '€' : h.currency === 'GBP' ? '£' : '₺'}{h.total_value.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                      {h.currency === 'USD' ? '$' : h.currency === 'EUR' ? '€' : h.currency === 'GBP' ? '£' : '₺'}{(h.total_value || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                   </div>
                                                   {h.currency !== 'TRY' && (
-                                                      <div className="text-[10px] text-gray-400">≈₺{h.total_value_try.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</div>
+                                                      <div className="text-[10px] text-gray-400">≈₺{(h.total_value_try || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</div>
                                                   )}
                                              </div>
                                          </div>
                                          
                                          {/* Footer: Profit/Loss */}
-                                         <div className={`pt-3 border-t border-gray-800 flex justify-between items-center ${h.profit_loss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                         <div className={`pt-3 border-t border-gray-800 flex justify-between items-center ${(h.profit_loss || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                               <span className="text-[10px] font-bold uppercase opacity-70 tracking-wider">Total P/L</span>
                                               <div className="text-right flex flex-col items-end">
                                                   <span className="font-bold flex items-center space-x-1 text-sm">
-                                                     {h.profit_loss >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                                                     <span>{h.profit_loss >= 0 ? '+' : ''}{h.currency === 'USD' ? '$' : '₺'}{h.profit_loss.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                     {(h.profit_loss || 0) >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                                                     <span>{(h.profit_loss || 0) >= 0 ? '+' : ''}{h.currency === 'USD' ? '$' : '₺'}{(h.profit_loss || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                                                   </span>
-                                                  <span className={`text-[10px] font-bold ${h.profit_loss_pct >= 0 ? 'text-green-500/70' : 'text-red-500/70'}`}>
-                                                      {h.profit_loss_pct.toFixed(2)}%
+                                                  <span className={`text-[10px] font-bold ${(h.profit_loss_pct || 0) >= 0 ? 'text-green-500/70' : 'text-red-500/70'}`}>
+                                                      {(h.profit_loss_pct || 0).toFixed(2)}%
                                                   </span>
                                               </div>
                                          </div>

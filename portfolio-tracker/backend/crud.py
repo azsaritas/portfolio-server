@@ -102,8 +102,8 @@ def get_usd_try_rate():
     except:
         return 1.0
 
-def get_holdings(db: Session):
-    holdings = db.query(models.Holding).all()
+def get_holdings(db: Session, user_id: int):
+    holdings = db.query(models.Holding).filter(models.Holding.user_id == user_id).all()
     results = []
     
     # Fetch USD rate once
@@ -216,7 +216,7 @@ def get_holdings(db: Session):
         })
     return results
 
-def create_holding(db: Session, holding: schemas.HoldingCreate):
+def create_holding(db: Session, holding: schemas.HoldingCreate, user_id: int):
     # 1. Ensure Asset exists (fetch price)
     # Normalize symbol first
     symbol_upper = holding.symbol.upper().strip()
@@ -251,8 +251,11 @@ def create_holding(db: Session, holding: schemas.HoldingCreate):
             # If 400 (already exists), just get it
             asset = get_asset(db, symbol_upper)
 
-    # 2. Check if Holding exists
-    db_holding = db.query(models.Holding).filter(models.Holding.symbol == asset.symbol).first()
+    # 2. Check if Holding exists for this user
+    db_holding = db.query(models.Holding).filter(
+        models.Holding.symbol == asset.symbol,
+        models.Holding.user_id == user_id
+    ).first()
 
     if db_holding:
         # Update existing holding (Weighted Average)
@@ -267,6 +270,7 @@ def create_holding(db: Session, holding: schemas.HoldingCreate):
     else:
         # Create new holding
         db_holding = models.Holding(
+            user_id=user_id,
             symbol=asset.symbol,
             quantity=holding.quantity,
             average_cost=holding.unit_cost
@@ -288,20 +292,26 @@ def create_holding(db: Session, holding: schemas.HoldingCreate):
         "profit_loss_pct": 0.0 # Just calculate in frontend or reuse logic
     }
 
-def delete_holding(db: Session, holding_id: int):
-    holding = db.query(models.Holding).filter(models.Holding.id == holding_id).first()
+def delete_holding(db: Session, holding_id: int, user_id: int):
+    holding = db.query(models.Holding).filter(
+        models.Holding.id == holding_id,
+        models.Holding.user_id == user_id
+    ).first()
     if not holding:
-        raise HTTPException(status_code=404, detail="Holding not found")
+        raise HTTPException(status_code=404, detail="Holding not found or access denied")
     
     db.delete(holding)
     db.commit()
     return {"ok": True}
 
-def reduce_holding(db: Session, holding_id: int, quantity: float):
+def reduce_holding(db: Session, holding_id: int, quantity: float, user_id: int):
     """Reduce the quantity of a holding by a specified amount."""
-    holding = db.query(models.Holding).filter(models.Holding.id == holding_id).first()
+    holding = db.query(models.Holding).filter(
+        models.Holding.id == holding_id,
+        models.Holding.user_id == user_id
+    ).first()
     if not holding:
-        raise HTTPException(status_code=404, detail="Holding not found")
+        raise HTTPException(status_code=404, detail="Holding not found or access denied")
     
     if quantity > holding.quantity:
         raise HTTPException(status_code=400, detail="Cannot reduce more than current quantity")
@@ -319,11 +329,14 @@ def reduce_holding(db: Session, holding_id: int, quantity: float):
     
     return {"ok": True, "remaining_quantity": holding.quantity}
 
-def update_holding_cost(db: Session, holding_id: int, average_cost: float):
+def update_holding_cost(db: Session, holding_id: int, average_cost: float, user_id: int):
     """Update the average cost of a holding."""
-    holding = db.query(models.Holding).filter(models.Holding.id == holding_id).first()
+    holding = db.query(models.Holding).filter(
+        models.Holding.id == holding_id,
+        models.Holding.user_id == user_id
+    ).first()
     if not holding:
-        raise HTTPException(status_code=404, detail="Holding not found")
+        raise HTTPException(status_code=404, detail="Holding not found or access denied")
     
     holding.average_cost = average_cost
     db.commit()
@@ -362,8 +375,8 @@ def get_price(symbol: str):
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-def _calculate_portfolio_history(db: Session, period: str = "1mo"):
-    holdings = get_holdings(db)
+def _calculate_portfolio_history(db: Session, user_id: int, period: str = "1mo"):
+    holdings = get_holdings(db, user_id)
     if not holdings:
         return []
 
@@ -553,12 +566,12 @@ def _calculate_portfolio_history(db: Session, period: str = "1mo"):
     history.sort(key=lambda x: x['date'])
     return history
 
-def get_portfolio_history(db: Session):
-    return _calculate_portfolio_history(db, period="1mo")
+def get_portfolio_history(db: Session, user_id: int):
+    return _calculate_portfolio_history(db, user_id, period="1mo")
 
-def get_portfolio_stats(db: Session):
+def get_portfolio_stats(db: Session, user_id: int):
     # Fetch 2 years of history to ensure enough data for yearly comparison + history
-    history = _calculate_portfolio_history(db, period="2y")
+    history = _calculate_portfolio_history(db, user_id, period="2y")
     if not history:
         return {}
     
@@ -641,7 +654,8 @@ def get_portfolio_stats(db: Session):
         "yearly": calculate_period_stats(365)
     }
 
-def update_all_assets(db: Session):
+def update_all_assets(db: Session, user_id: int = None):
+    # user_id is optional here - we update all assets (shared table)
     assets = db.query(models.Asset).all()
     count = 0
     
