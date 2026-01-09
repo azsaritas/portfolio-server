@@ -49,7 +49,7 @@ export default function Home() {
   
   // Load guest holdings from localStorage on mount
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!authLoading && !isAuthenticated) {
       const stored = localStorage.getItem('guest_holdings');
       if (stored) {
         try {
@@ -63,7 +63,7 @@ export default function Home() {
       // Show warning if there are unsaved holdings
       setShowGuestWarning(true);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, authLoading]);
   
   // Warn user before leaving with unsaved guest data
   useEffect(() => {
@@ -139,6 +139,77 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState('');
+  const [usdRate, setUsdRate] = useState(0);
+
+  // Fetch USD Rate on mount
+  useEffect(() => {
+      const fetchUsdRate = async () => {
+          try {
+              const res = await fetch(`${API_BASE_URL}/price/USDTRY=X`);
+              if (res.ok) {
+                  const data = await res.json();
+                  setUsdRate(data.price);
+              }
+          } catch (e) {
+              console.error('Failed to fetch USD rate');
+          }
+      };
+      fetchUsdRate();
+  }, []);
+
+  // Update guest holdings when USD Rate changes
+  useEffect(() => {
+      if (!isAuthenticated && usdRate > 0 && guestHoldings.length > 0) {
+          let hasChanges = false;
+          const updated = guestHoldings.map(h => {
+              if (h.currency === 'USD') {
+                  const newTryVal = h.total_value * usdRate;
+                  const newTryPL = h.profit_loss * usdRate;
+                  if (Math.abs(newTryVal - (h.total_value_try || 0)) > 0.1) {
+                      hasChanges = true;
+                      return { ...h, total_value_try: newTryVal, profit_loss_try: newTryPL };
+                  }
+              }
+              return h;
+          });
+          
+          if (hasChanges) {
+              setGuestHoldings(updated);
+              setHoldings(updated);
+          }
+      }
+  }, [usdRate, isAuthenticated]);
+
+  // Simulate history for guest users
+  useEffect(() => {
+     const simulateHistory = async () => {
+         if (!isAuthenticated && guestHoldings.length > 0) {
+             const payload = {
+                 items: guestHoldings.map(h => ({ symbol: h.symbol, quantity: h.quantity }))
+             };
+             try {
+                 const res = await fetch(`${API_BASE_URL}/portfolio/simulate`, {
+                     method: 'POST',
+                     headers: {'Content-Type': 'application/json'},
+                     body: JSON.stringify(payload)
+                 });
+                 if (res.ok) {
+                     const data = await res.json();
+                     setHistoryData(data.history);
+                     setPortfolioStats(data.stats);
+                 }
+             } catch (e) {
+                 console.error("Simulation failed");
+             }
+         } else if (!isAuthenticated && guestHoldings.length === 0) {
+             setHistoryData([]);
+             setPortfolioStats(null);
+         }
+     };
+     
+     const timeout = setTimeout(simulateHistory, 1000); 
+     return () => clearTimeout(timeout);
+  }, [guestHoldings, isAuthenticated]);
 
   // Guest mode helper: Add holding to localStorage
   const addGuestHolding = (newHolding: any) => {
@@ -173,9 +244,9 @@ export default function Home() {
             total_value: totalValue,
             profit_loss: profitLoss,
             profit_loss_pct: profitLossPct,
-            daily_change_pct: 0, // Reset or keep? Keep 0 for guest for now
-            total_value_try: currency === 'TRY' ? totalValue : 0, // Approx
-            profit_loss_try: currency === 'TRY' ? profitLoss : 0,
+            daily_change_pct: 0, 
+            total_value_try: currency === 'TRY' ? totalValue : (usdRate > 0 ? totalValue * usdRate : 0),
+            profit_loss_try: currency === 'TRY' ? profitLoss : (usdRate > 0 ? profitLoss * usdRate : 0),
         };
         
         updated = [...guestHoldings];
@@ -200,8 +271,8 @@ export default function Home() {
             profit_loss_pct: profitLossPct,
             total_value: totalValue,
             currency: currency,
-            total_value_try: currency === 'TRY' ? totalValue : 0,
-            profit_loss_try: currency === 'TRY' ? profitLoss : 0,
+            total_value_try: currency === 'TRY' ? totalValue : (usdRate > 0 ? totalValue * usdRate : 0),
+            profit_loss_try: currency === 'TRY' ? profitLoss : (usdRate > 0 ? profitLoss * usdRate : 0),
         };
         updated = [...guestHoldings, holdingWithId];
     }
@@ -318,7 +389,9 @@ export default function Home() {
   useEffect(() => {
     // Auto-refresh logic: Only refresh if 1 hour since last refresh
     const checkAndFetch = async () => {
-      if (!accessToken) return;
+      // Wait for auth to finish loading and require authentication
+      if (authLoading || !accessToken || !isAuthenticated) return;
+      
       const REFRESH_INTERVAL = 60 * 60 * 1000; // 1 hour in ms
       const lastRefresh = parseInt(localStorage.getItem('portfolio_last_refresh') || '0', 10);
       const now = Date.now();
@@ -351,7 +424,7 @@ export default function Home() {
     return () => {
         document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [accessToken]);
+  }, [accessToken, isAuthenticated, authLoading]);
 
 
 
@@ -792,7 +865,18 @@ export default function Home() {
 
   // Aggregate chart data based on period
   const aggregatedChartData = useMemo(() => {
-    if (!historyData || historyData.length === 0) return [];
+    if (!historyData || historyData.length === 0) {
+         // Guest fallback if simulation fails or pending
+         if (!isAuthenticated && holdings.length > 0) {
+             const totalVal = holdings.reduce((acc, h) => acc + (h.total_value_try || 0), 0);
+             return [{
+                 date: new Date().toISOString(),
+                 value: totalVal,
+                 percentage: 0
+             }];
+         }
+         return [];
+    }
     
     if (chartPeriod === 'daily') {
       return historyData;

@@ -98,6 +98,10 @@ def update_holding_cost(
 def get_price(symbol: str):
     return crud.get_price(symbol)
 
+@app.post("/portfolio/simulate")
+def simulate_portfolio(request: schemas.SimulationRequest):
+    return crud.simulate_portfolio(request)
+
 @app.get("/portfolio/history")
 def get_portfolio_history(
     db: Session = Depends(get_db),

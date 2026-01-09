@@ -1,7 +1,8 @@
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
+# ============ Asset & Holding Schemas ============
 class AssetBase(BaseModel):
     symbol: str
 
@@ -62,11 +63,13 @@ class UserResponse(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
+    token_type: str
 
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
+
+class TokenData(BaseModel):
+    email: Optional[str] = None
 
 class PasswordResetRequest(BaseModel):
     email: EmailStr
@@ -76,4 +79,12 @@ class PasswordReset(BaseModel):
     new_password: str
 
 class GoogleAuthRequest(BaseModel):
-    credential: str  # Google ID token from frontend
+    credential: str
+
+# ============ Simulation Schemas ============
+class SimulationItem(BaseModel):
+    symbol: str
+    quantity: float
+
+class SimulationRequest(BaseModel):
+    items: List[SimulationItem]

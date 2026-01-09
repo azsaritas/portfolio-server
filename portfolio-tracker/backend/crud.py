@@ -695,3 +695,138 @@ def update_all_assets(db: Session, user_id: int = None):
 
     db.commit()
     return {"updated": count}
+
+# ============ Portfolio Simulation ============
+def simulate_portfolio(request: schemas.SimulationRequest):
+    # Separate items
+    tickers = []
+    funds = []
+    
+    # Map symbol -> quantity
+    quantities = {}
+    
+    for item in request.items:
+        symbol = item.symbol.upper().strip()
+        quantities[symbol] = item.quantity
+        
+        # Identify type
+        is_cash = symbol.startswith("CASH_")
+        is_tefas = len(symbol) == 3 and symbol.isalnum() and not is_cash
+        
+        if is_tefas:
+            funds.append(symbol)
+        elif not is_cash:
+            # YFinance Ticker
+            if "-" not in symbol and "." not in symbol and "=" not in symbol:
+                symbol += ".IS"
+            tickers.append(symbol)
+            quantities[symbol] = item.quantity
+
+    # Date Range (Last 1 year)
+    end_date = datetime.now()
+    start_date = end_date - pd.Timedelta(days=365)
+    
+    # Master DataFrame
+    master_df = pd.DataFrame(index=pd.date_range(start=start_date, end=end_date, freq='D'))
+    
+    # 1. Fetch YFinance Data
+    if tickers:
+        try:
+            # Add USDTRY=X for conversion
+            tickers_to_download = list(set(tickers + ["USDTRY=X"]))
+            data = yf.download(tickers_to_download, start=start_date, end=end_date, progress=False)['Close']
+            
+            # If single ticker, data is Series (or DF with 1 col). If multiple, DF with cols.
+            if isinstance(data, pd.Series):
+                data = data.to_frame(name=tickers_to_download[0])
+            
+            # Reindex to master
+            data = data.reindex(master_df.index).ffill()
+            
+            # Process Tickers
+            usd_rate_series = data["USDTRY=X"] if "USDTRY=X" in data.columns else pd.Series(30, index=master_df.index) 
+            
+            for ticker in tickers:
+                if ticker in data.columns:
+                    price_series = data[ticker]
+                    qty = quantities.get(ticker, 0)
+                    
+                    # Convert USD assets to TRY
+                    is_usd = False
+                    if ticker.endswith("=F") or "-USD" in ticker:
+                        is_usd = True
+                    
+                    if is_usd:
+                        val_series = price_series * qty * usd_rate_series
+                    else:
+                        val_series = price_series * qty
+                        
+                    # Add to master
+                    col_name = f"VAL_{ticker}"
+                    master_df[col_name] = val_series
+        except Exception as e:
+            print(f"Simulation Error (YF): {e}")
+
+    # 3. Aggregate
+    val_cols = [c for c in master_df.columns if c.startswith("VAL_")]
+    if val_cols:
+        master_df['Total'] = master_df[val_cols].sum(axis=1)
+    else:
+        master_df['Total'] = 0
+    
+    # Fill remaining NaNs
+    master_df['Total'] = master_df['Total'].ffill().fillna(0)
+    
+    # 4. Calculate Stats
+    portfolio_series = master_df['Total']
+    
+    def get_change(days):
+        if len(portfolio_series) < days + 1:
+            return 0, 0
+        now = portfolio_series.iloc[-1]
+        prev = portfolio_series.iloc[-(days+1)]
+        diff = now - prev
+        pct = (diff / prev * 100) if prev > 0 else 0
+        return diff, pct
+
+    day_val, day_pct = get_change(1)
+    week_val, week_pct = get_change(7)
+    month_val, month_pct = get_change(30)
+    year_val, year_pct = get_change(365)
+    
+    # History Graph (Filter out 0 values)
+    history_json = []
+    valid_series = portfolio_series[portfolio_series > 0]
+    
+    for date, val in valid_series.items():
+        history_json.append({
+            "date": date.strftime('%Y-%m-%d'),
+            "value": val,
+            "percentage": 0 
+        })
+        
+    return {
+        "stats": {
+            "daily": {
+                "current": {"value": day_val, "percentage": day_pct},
+                "previous": {"value": 0, "percentage": 0},
+                "history": []
+            },
+            "weekly": {
+                "current": {"value": week_val, "percentage": week_pct},
+                "previous": {"value": 0, "percentage": 0},
+                "history": []
+            },
+            "monthly": {
+                "current": {"value": month_val, "percentage": month_pct},
+                "previous": {"value": 0, "percentage": 0},
+                "history": []
+            },
+            "yearly": {
+                "current": {"value": year_val, "percentage": year_pct},
+                "previous": {"value": 0, "percentage": 0},
+                "history": []
+            },
+        },
+        "history": history_json
+    }
