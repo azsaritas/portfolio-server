@@ -567,7 +567,7 @@ def _calculate_portfolio_history(db: Session, user_id: int, period: str = "1mo")
     return history
 
 def get_portfolio_history(db: Session, user_id: int):
-    return _calculate_portfolio_history(db, user_id, period="1mo")
+    return _calculate_portfolio_history(db, user_id, period="1y")
 
 def get_portfolio_stats(db: Session, user_id: int):
     # Fetch 2 years of history to ensure enough data for yearly comparison + history
@@ -730,6 +730,7 @@ def simulate_portfolio(request: schemas.SimulationRequest):
     master_df = pd.DataFrame(index=pd.date_range(start=start_date, end=end_date, freq='D'))
     
     # 1. Fetch YFinance Data
+    data = None  # Initialize before try block
     if tickers:
         try:
             # Add USDTRY=X for conversion
@@ -740,8 +741,12 @@ def simulate_portfolio(request: schemas.SimulationRequest):
             if isinstance(data, pd.Series):
                 data = data.to_frame(name=tickers_to_download[0])
             
-            # Reindex to master
-            data = data.reindex(master_df.index).ffill()
+            # Normalize both indices to date-only for proper alignment
+            data.index = pd.to_datetime(data.index).normalize()
+            master_df.index = pd.to_datetime(master_df.index).normalize()
+            
+            # Reindex to master and forward fill
+            data = data.reindex(master_df.index).ffill().bfill()
             
             # Process Tickers
             usd_rate_series = data["USDTRY=X"] if "USDTRY=X" in data.columns else pd.Series(30, index=master_df.index) 
@@ -805,28 +810,130 @@ def simulate_portfolio(request: schemas.SimulationRequest):
             "percentage": 0 
         })
         
+    # 5. Calculate Holdings Details for Frontend
+    simulated_holdings = []
+    
+    # Get latest USD rate for conversion
+    usd_rate = 30.0
+    data_exists = data is not None and isinstance(data, pd.DataFrame)
+    if data_exists and isinstance(data, pd.DataFrame) and "USDTRY=X" in data.columns:
+        last_usd = data["USDTRY=X"].dropna()
+        if len(last_usd) > 0:
+            usd_rate = float(last_usd.iloc[-1])
+
+    for item in request.items:
+        symbol = item.symbol.upper().strip()
+        qty = item.quantity
+        
+        # Determine internal ticker symbol used in data
+        ticker = symbol
+        is_cash = symbol.startswith("CASH_")
+        is_tefas = len(symbol) == 3 and symbol.isalnum() and not is_cash
+        
+        if not is_cash and not is_tefas:
+            if "-" not in symbol and "." not in symbol and "=" not in symbol:
+                ticker = symbol + ".IS"
+        
+        current_price = 0.0
+        daily_change_pct = 0.0
+        
+        if is_cash:
+            current_price = 1.0
+        elif data_exists and isinstance(data, pd.DataFrame) and ticker in data.columns:
+            series = data[ticker].dropna()
+            if len(series) > 0:
+                current_price = float(series.iloc[-1])
+                # Find the last price that's different from current (actual trading day change)
+                prev_price = current_price
+                for i in range(2, min(len(series), 10)):  # Look back up to 10 days
+                    potential_prev = float(series.iloc[-i])
+                    if abs(potential_prev - current_price) > 0.0001:  # Found a different price
+                        prev_price = potential_prev
+                        break
+                if prev_price > 0 and abs(prev_price - current_price) > 0.0001:
+                    daily_change_pct = ((current_price - prev_price) / prev_price) * 100
+        
+        total_value = qty * current_price
+        
+        # Determine Currency
+        currency = "TRY"
+        if ticker.endswith("=F") or "-USD" in ticker:
+            currency = "USD"
+            
+        total_value_try = total_value
+        if currency == "USD":
+            total_value_try = total_value * usd_rate
+            
+        simulated_holdings.append({
+            "id": 0,
+            "symbol": symbol,
+            "name": symbol,
+            "quantity": qty,
+            "average_cost": 0,
+            "current_price": current_price,
+            "total_value": total_value,
+            "profit_loss": 0,
+            "profit_loss_pct": 0,
+            "daily_change_pct": daily_change_pct,
+            "currency": currency,
+            "total_value_try": total_value_try,
+            "profit_loss_try": 0
+        })
+
+    # Generate period histories
+    def generate_period_history(days_per_period, count=10):
+        hist = []
+        total_len = len(portfolio_series)
+        for i in range(count):
+            end_idx = total_len - 1 - (days_per_period * i)
+            start_idx = end_idx - days_per_period
+            if start_idx < 0 or end_idx < 0:
+                break
+            
+            end_val = float(portfolio_series.iloc[end_idx]) if end_idx < total_len else 0
+            start_val = float(portfolio_series.iloc[start_idx]) if start_idx >= 0 and start_idx < total_len else 0
+            
+            diff = end_val - start_val
+            pct = (diff / start_val * 100) if start_val > 0 else 0
+            
+            date_label = portfolio_series.index[end_idx].strftime('%Y-%m-%d') if end_idx < total_len else ""
+            
+            hist.append({
+                "date": date_label,
+                "value": diff,
+                "percentage": pct,
+                "total_value": end_val
+            })
+        return hist
+
+    daily_history = generate_period_history(1, 10)
+    weekly_history = generate_period_history(7, 10)
+    monthly_history = generate_period_history(30, 12)
+    yearly_history = generate_period_history(365, 5)
+
     return {
         "stats": {
             "daily": {
                 "current": {"value": day_val, "percentage": day_pct},
                 "previous": {"value": 0, "percentage": 0},
-                "history": []
+                "history": daily_history
             },
             "weekly": {
                 "current": {"value": week_val, "percentage": week_pct},
                 "previous": {"value": 0, "percentage": 0},
-                "history": []
+                "history": weekly_history
             },
             "monthly": {
                 "current": {"value": month_val, "percentage": month_pct},
                 "previous": {"value": 0, "percentage": 0},
-                "history": []
+                "history": monthly_history
             },
             "yearly": {
                 "current": {"value": year_val, "percentage": year_pct},
                 "previous": {"value": 0, "percentage": 0},
-                "history": []
+                "history": yearly_history
             },
         },
-        "history": history_json
+        "history": history_json,
+        "holdings": simulated_holdings
     }

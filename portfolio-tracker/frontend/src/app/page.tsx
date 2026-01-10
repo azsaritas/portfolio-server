@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useRef, Fragment, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Minus, RefreshCw, TrendingUp, TrendingDown, Search, Wallet, ArrowUpRight, ArrowDownRight, Trash2, X, PieChart as PieChartIcon, ChevronDown, ChevronRight, ArrowUp, ArrowDown, Pencil, MoreVertical, LogOut, User, LogIn, AlertCircle } from 'lucide-react';
+import { Plus, Minus, RefreshCw, TrendingUp, TrendingDown, Search, Wallet, ArrowUpRight, ArrowDownRight, Trash2, X, PieChart as PieChartIcon, ChevronDown, ChevronRight, ArrowUp, ArrowDown, Pencil, MoreVertical, LogOut, User, LogIn, AlertCircle, Trophy, Sparkles } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import { useUI } from '@/context/UIContext';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Sector } from 'recharts';
 import { BIST_STOCKS } from '@/data/bist_stocks';
 import { CRYPTO_COINS } from '@/data/crypto_coins';
@@ -82,8 +83,22 @@ export default function Home() {
   const [holdings, setHoldings] = useState<Holding[]>([]);
   
   // Modal State
+  const { isAddModalOpen, closeAddModal } = useUI();
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // Sync global modal state to local state (for now, to avoid deep refactor of modal logic)
+  useEffect(() => {
+      setIsModalOpen(isAddModalOpen);
+  }, [isAddModalOpen]);
+
+  // When local modal closes, update global
+  const handleCloseModal = () => {
+      setIsModalOpen(false);
+      closeAddModal();
+  };
+
   const [isReduceModalOpen, setIsReduceModalOpen] = useState(false);
+  const [topMoversMetric, setTopMoversMetric] = useState<'amount' | 'percent'>('amount');
   const [reduceHolding, setReduceHolding] = useState<Holding | null>(null);
   const [reduceQuantity, setReduceQuantity] = useState('');
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -197,6 +212,29 @@ export default function Home() {
                      const data = await res.json();
                      setHistoryData(data.history);
                      setPortfolioStats(data.stats);
+
+                      if (data.holdings && data.holdings.length > 0) {
+                        const updatedHoldings = guestHoldings.map(localH => {
+                          const simH = data.holdings.find((h: any) => h.symbol === localH.symbol);
+                          if (simH) {
+                             const totalBase = localH.quantity * localH.average_cost;
+                             const profit = simH.total_value_try - (simH.currency === 'USD' ? totalBase * (simH.total_value_try / simH.total_value) : totalBase);
+                             
+                             return {
+                               ...localH,
+                               current_price: simH.current_price,
+                               daily_change_pct: simH.daily_change_pct,
+                               total_value: simH.total_value,
+                               total_value_try: simH.total_value_try,
+                               profit_loss: profit,
+                               profit_loss_try: profit,
+                               profit_loss_pct: totalBase > 0 ? (profit / totalBase) * 100 : 0
+                             };
+                          }
+                          return localH;
+                        });
+                        setHoldings(updatedHoldings);
+                      }
                  }
              } catch (e) {
                  console.error("Simulation failed");
@@ -479,7 +517,7 @@ export default function Home() {
           });
           setSymbol('');
           setQuantity('');
-          setIsModalOpen(false);
+          handleCloseModal();
           setAdding(false);
           return;
         }
@@ -505,7 +543,7 @@ export default function Home() {
         
         setSymbol('');
         setQuantity('');
-        setIsModalOpen(false);
+        handleCloseModal();
         await fetchHoldings();
       } catch (err: any) {
         setError(err.message);
@@ -561,7 +599,7 @@ export default function Home() {
         setAmount('');
         setCost('');
         setCurrentPrice(0);
-        setIsModalOpen(false);
+        handleCloseModal();
         setAdding(false);
         return;
       }
@@ -591,7 +629,7 @@ export default function Home() {
       setAmount('');
       setCost('');
       setCurrentPrice(0);
-      setIsModalOpen(false); // Close Modal
+      handleCloseModal(); // Close Modal
       fetchHoldings();
     } catch (err: any) {
       setError(err.message);
@@ -977,105 +1015,201 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-gray-950 text-gray-100 p-4 md:p-8 font-sans relative">
-      <div className="max-w-6xl mx-auto space-y-6 md:space-y-8">
+    <div className="space-y-6 md:space-y-8">
         
-        {/* Header & Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
-            {/* Title Card */}
-            <div className="md:col-span-1 flex flex-col justify-center space-y-2">
-                <div className="flex items-center justify-between mb-4">
-                     <div className="flex items-center space-x-3">
-                        <div className="p-3 bg-blue-600 rounded-xl shadow-lg shadow-blue-900/20">
-                        <Wallet className="w-6 h-6 md:w-8 md:h-8 text-white" />
-                        </div>
-                        <div>
-                        <h1 className="text-2xl md:text-3xl font-bold tracking-tight">My Portfolio</h1>
-                        <p className="text-gray-400 text-xs md:text-sm">Track your BIST investments</p>
-                        </div>
-                    </div>
-                    {/* User Badge & Logout */}
-                    <div className="flex items-center space-x-2">
-                        {user ? (
-                            <>
-                                <div className="hidden md:flex items-center space-x-2 px-3 py-1.5 bg-gray-800/50 rounded-full border border-gray-700">
-                                    <User className="w-4 h-4 text-gray-400" />
-                                    <span className="text-xs text-gray-300 max-w-[120px] truncate">{user.email}</span>
-                                </div>
-                                <button
-                                    onClick={logout}
-                                    className="p-2 bg-gray-800 hover:bg-red-500/20 rounded-xl text-gray-400 hover:text-red-400 transition-colors"
-                                    title="Çıkış Yap"
-                                >
-                                    <LogOut className="w-5 h-5" />
-                                </button>
-                            </>
-                        ) : (
-                            <button
-                                onClick={() => router.push('/login')}
-                                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl text-white font-medium transition-colors flex items-center space-x-2"
-                            >
-                                <LogIn className="w-4 h-4" />
-                                <span className="text-sm">Giriş Yap</span>
-                            </button>
-                        )}
+        {/* Guest Warning Banner */}
+        {showGuestWarning && (
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 flex items-center justify-between animate-fade-in relative overflow-hidden">
+                <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-500"></div>
+                <div className="flex items-center space-x-3">
+                    <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0" />
+                    <div>
+                        <p className="text-sm font-bold text-amber-500">Misafir Modu</p>
+                        <p className="text-xs text-amber-400/70 mt-0.5">Verileriniz sadece bu cihazda saklanır. <button onClick={() => router.push('/login')} className="underline hover:text-amber-300 font-medium">Giriş yapın</button>.</p>
                     </div>
                 </div>
-                
-                {/* Guest Mode Warning Banner */}
-                {!isAuthenticated && showGuestWarning && (
-                    <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-start space-x-3 text-amber-400">
-                        <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                        <div className="flex-1">
-                            <p className="text-sm font-medium">Misafir Modu</p>
-                            <p className="text-xs text-amber-400/80 mt-0.5">
-                                Eklediğiniz varlıklar sadece bu tarayıcıda saklanır. 
-                                Kalıcı olarak kaydetmek için <button onClick={() => router.push('/login')} className="underline font-medium hover:text-amber-300">giriş yapın</button>.
-                            </p>
-                        </div>
-                        <button onClick={() => setShowGuestWarning(false)} className="text-amber-400/60 hover:text-amber-400">
-                            <X className="w-4 h-4" />
-                        </button>
-                    </div>
-                )}
-                
-                <button 
-                    onClick={() => setIsModalOpen(true)}
-                    className="w-full py-3 md:py-4 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 rounded-2xl font-bold text-white shadow-lg shadow-blue-900/30 transition-all active:scale-95 flex items-center justify-center text-base md:text-lg space-x-2 border border-blue-400/20"
-                >
-                    <Plus className="w-5 h-5 md:w-6 md:h-6" />
-                    <span>Add New Transaction</span>
-                </button>
+                <button onClick={() => setShowGuestWarning(false)} className="p-2 hover:bg-amber-500/10 rounded-full transition-colors"><X className="w-4 h-4 text-amber-500/50 hover:text-amber-500" /></button>
             </div>
+        )}
 
-            {/* Total Balance Card */}
+        {/* Top KPI Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
+            
+            {/* Total Value */}
             <div 
                 onClick={() => setActiveTotalModal('VALUE')}
-                className="bg-gray-900/50 p-5 md:p-6 rounded-2xl border border-gray-800 shadow-xl backdrop-blur-sm cursor-pointer hover:bg-gray-800 transition-all group"
+                className="bg-gray-900/50 p-6 rounded-2xl border border-gray-800 shadow-xl backdrop-blur-sm cursor-pointer hover:bg-gray-800 transition-all group relative overflow-hidden"
             >
-                <div className="flex items-center justify-between mb-2">
-                     <p className="text-gray-400 text-xs md:text-sm font-medium uppercase tracking-wider group-hover:text-blue-400 transition-colors">Total Portfolio Value</p>
-                     <TrendingUp className="w-5 h-5 md:w-6 md:h-6 text-gray-700 group-hover:text-blue-500 transition-colors" />
+                <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity transform group-hover:scale-110 duration-300">
+                    <Wallet className="w-20 h-20 text-white" />
                 </div>
-                <h2 className="text-3xl md:text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400 flex items-baseline">
+                <p className="text-gray-400 text-xs font-bold uppercase tracking-widest mb-2">Toplam Varlık</p>
+                <h2 className="text-3xl md:text-5xl font-black text-white tracking-tighter">
                     ₺{totalPortfolioValue.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </h2>
+                <div className="mt-2 flex items-center text-xs font-medium text-gray-500">
+                   <span className="flex items-center text-blue-400 mr-2"><Wallet className="w-3 h-3 mr-1" /> PortfolioX</span>
+                   Updated just now
+                </div>
             </div>
 
-            {/* Profit/Loss Card */}
+            {/* Total Profit/Loss */}
             <div 
                 onClick={() => setActiveTotalModal('PL')}
-                className="bg-gray-900/50 p-6 rounded-2xl border border-gray-800 shadow-xl backdrop-blur-sm cursor-pointer hover:bg-gray-800 transition-all group"
+                className="bg-gray-900/50 p-6 rounded-2xl border border-gray-800 shadow-xl backdrop-blur-sm cursor-pointer hover:bg-gray-800 transition-all group relative overflow-hidden"
             >
-                 <p className="text-gray-400 text-sm font-medium uppercase tracking-wider mb-1 group-hover:text-blue-400 transition-colors">Total Profit / Loss</p>
+                 <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity transform group-hover:scale-110 duration-300">
+                    <TrendingUp className="w-20 h-20 text-white" />
+                </div>
+                 <p className="text-gray-400 text-xs font-bold uppercase tracking-widest mb-2">Toplam Kâr/Zarar</p>
                  <div className="flex items-baseline space-x-3">
-                    <h2 className={`text-3xl md:text-4xl font-bold ${totalProfitLoss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {totalProfitLoss >= 0 ? '+' : '-'}₺{Math.abs(totalProfitLoss).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <h2 className={`text-3xl md:text-5xl font-black tracking-tighter ${totalProfitLoss >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                        {totalProfitLoss >= 0 ? '+' : ''}₺{Math.abs(totalProfitLoss).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </h2>
-                    <div className={`flex items-center text-sm font-bold px-2 py-1 rounded-full ${totalProfitLossPct >= 0 ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
-                        {totalProfitLossPct >= 0 ? <ArrowUpRight className="w-4 h-4 mr-1" /> : <ArrowDownRight className="w-4 h-4 mr-1" />}
+                 </div>
+                 <div className="mt-2 flex items-center">
+                    <span className={`flex items-center text-xs font-bold px-2 py-1 rounded-lg ${totalProfitLossPct >= 0 ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+                        {totalProfitLossPct >= 0 ? <ArrowUpRight className="w-3 h-3 mr-1" /> : <ArrowDownRight className="w-3 h-3 mr-1" />}
                         {Math.abs(totalProfitLossPct).toFixed(2)}%
-                    </div>
+                    </span>
+                    <span className="ml-2 text-xs text-gray-500">All time return</span>
+                 </div>
+            </div>
+
+             {/* Feature Widget: Top Movers Split */}
+            <div className="bg-gray-900/50 rounded-2xl border border-gray-800 shadow-xl backdrop-blur-sm relative overflow-hidden flex flex-col group h-full min-h-[160px]">
+                 {/* Widget Header */}
+                 <div className="px-3 py-2 border-b border-gray-800 bg-gray-900/30 flex items-center justify-between shrink-0">
+                     <p className="text-gray-400 text-[10px] font-bold uppercase tracking-widest flex items-center">
+                         <Sparkles className="w-3 h-3 mr-1.5 text-blue-400" />
+                         Günün Enleri
+                     </p>
+                     
+                     {/* Metric Toggle */}
+                     <div className="flex bg-gray-800 rounded-lg p-0.5 relative">
+                         <div 
+                             className={`absolute top-0.5 bottom-0.5 w-[50%] bg-blue-600 rounded-md transition-all duration-300 ease-in-out ${topMoversMetric === 'amount' ? 'left-0.5' : 'left-[48.5%]'}`}
+                         />
+                         <button 
+                             onClick={(e) => { e.stopPropagation(); setTopMoversMetric('amount'); }}
+                             className={`relative z-10 px-2 py-0.5 text-[10px] font-bold transition-colors ${topMoversMetric === 'amount' ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                         >
+                             ₺
+                         </button>
+                         <button 
+                             onClick={(e) => { e.stopPropagation(); setTopMoversMetric('percent'); }}
+                             className={`relative z-10 px-2 py-0.5 text-[10px] font-bold transition-colors ${topMoversMetric === 'percent' ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                         >
+                             %
+                         </button>
+                     </div>
+                 </div>
+
+                 <div className="flex flex-1 w-full relative">
+                 {(() => {
+                     let bestPerformer: Holding | null = null;
+                     let worstPerformer: Holding | null = null;
+                     let bestValue = 0;
+                     let worstValue = 0;
+
+                     if (holdings.length > 0) {
+                        if (topMoversMetric === 'amount') {
+                            // Calculate by Amount
+                            bestPerformer = holdings.reduce((max, h) => {
+                                const hVal = (h.total_value_try || 0);
+                                const hChange = hVal * (h.daily_change_pct || 0) / (100 + (h.daily_change_pct || 0));
+                                const maxVal = (max.total_value_try || 0);
+                                const maxChange = maxVal * (max.daily_change_pct || 0) / (100 + (max.daily_change_pct || 0));
+                                return hChange > maxChange ? h : max;
+                            }, holdings[0]);
+
+                            worstPerformer = holdings.reduce((min, h) => {
+                                const hVal = (h.total_value_try || 0);
+                                const hChange = hVal * (h.daily_change_pct || 0) / (100 + (h.daily_change_pct || 0));
+                                const minVal = (min.total_value_try || 0);
+                                const minChange = minVal * (min.daily_change_pct || 0) / (100 + (min.daily_change_pct || 0));
+                                return hChange < minChange ? h : min;
+                            }, holdings[0]);
+                            
+                            if (bestPerformer) bestValue = (bestPerformer.total_value_try || 0) * (bestPerformer.daily_change_pct || 0) / (100 + (bestPerformer.daily_change_pct || 0));
+                            if (worstPerformer) worstValue = (worstPerformer.total_value_try || 0) * (worstPerformer.daily_change_pct || 0) / (100 + (worstPerformer.daily_change_pct || 0));
+
+                        } else {
+                            // Calculate by Percent
+                            bestPerformer = holdings.reduce((max, h) => (h.daily_change_pct || 0) > (max.daily_change_pct || 0) ? h : max, holdings[0]);
+                            worstPerformer = holdings.reduce((min, h) => (h.daily_change_pct || 0) < (min.daily_change_pct || 0) ? h : min, holdings[0]);
+                            
+                            // For display purposes, we still show the amount change as secondary or primary depending on design choice.
+                            // But usually "Top Gainer %" still shows the % prominently.
+                            // The variables bestValue/worstValue are used for the main big number display below.
+                            // If mode is %, maybe we should swap them? 
+                            // Request said: "show top movers by amount OR by percent".
+                            // Usually this implies the SORTING is by that metric.
+                            // The display can remain consistent (Amount + Badge for %), OR swap.
+                            // Let's keep display consistent (Big Amount, Small badge %) for consistency, 
+                            // but the *Asset* selected changes.
+                            
+                            if (bestPerformer) bestValue = (bestPerformer.total_value_try || 0) * (bestPerformer.daily_change_pct || 0) / (100 + (bestPerformer.daily_change_pct || 0));
+                            if (worstPerformer) worstValue = (worstPerformer.total_value_try || 0) * (worstPerformer.daily_change_pct || 0) / (100 + (worstPerformer.daily_change_pct || 0));
+                        }
+                     }
+
+                     return (
+                         <>
+                            {/* Left Side: Winner */}
+                            <div className="flex-1 p-3 md:p-4 border-r border-gray-800 relative overflow-hidden group/winner flex flex-col justify-center">
+                                <div className="absolute top-0 right-0 p-2 opacity-5 group-hover/winner:opacity-10 transition-opacity">
+                                    <Trophy className="w-16 h-16 text-yellow-500" />
+                                </div>
+                                <div className="flex justify-between items-start mb-1">
+                                    <div className="flex items-center text-yellow-500 space-x-1">
+                                         <Trophy className="w-3 h-3" />
+                                         <span className="text-[10px] font-bold uppercase tracking-wider">Kazanan</span>
+                                    </div>
+                                    <div className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${topMoversMetric === 'percent' ? 'bg-green-500 text-white shadow-sm shadow-green-500/50' : 'text-green-400 bg-green-500/10'}`}>
+                                        %{bestPerformer?.daily_change_pct.toFixed(2)}
+                                    </div>
+                                </div>
+                                {bestPerformer ? (
+                                    <div className="relative z-10">
+                                        <h3 className="text-base font-black text-white truncate">{bestPerformer.symbol}</h3>
+                                        <div className={`font-bold transition-all ${topMoversMetric === 'amount' ? 'text-lg text-green-400' : 'text-sm text-green-400/80'}`}>
+                                            +{Math.abs(bestValue).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}₺
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <span className="text-gray-500 text-xs">Veri Yok</span>
+                                )}
+                            </div>
+
+                            {/* Right Side: Loser */}
+                            <div className="flex-1 p-3 md:p-4 relative overflow-hidden group/loser flex flex-col justify-center">
+                                <div className="absolute top-0 right-0 p-2 opacity-5 group-hover/loser:opacity-10 transition-opacity">
+                                    <TrendingDown className="w-16 h-16 text-red-500" />
+                                </div>
+                                <div className="flex justify-between items-start mb-1">
+                                     <div className="flex items-center text-red-500 space-x-1">
+                                         <TrendingDown className="w-3 h-3" />
+                                         <span className="text-[10px] font-bold uppercase tracking-wider">Kaybeden</span>
+                                    </div>
+                                    <div className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${topMoversMetric === 'percent' ? 'bg-red-500 text-white shadow-sm shadow-red-500/50' : 'text-red-400 bg-red-500/10'}`}>
+                                        %{worstPerformer?.daily_change_pct.toFixed(2)}
+                                    </div>
+                                </div>
+                                {worstPerformer ? (
+                                    <div className="relative z-10">
+                                        <h3 className="text-base font-black text-white truncate">{worstPerformer.symbol}</h3>
+                                        <div className={`font-bold transition-all ${topMoversMetric === 'amount' ? 'text-lg text-red-400' : 'text-sm text-red-400/80'}`}>
+                                            {worstValue >= 0 ? '+' : '-'}{Math.abs(worstValue).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}₺
+                                        </div>
+                                    </div>
+                                ) : (
+                                     <span className="text-gray-500 text-xs">Veri Yok</span>
+                                )}
+                            </div>
+                         </>
+                     );
+                 })()}
                  </div>
             </div>
         </div>
@@ -1446,7 +1580,7 @@ export default function Home() {
                             Add Transaction
                         </h2>
                         <button 
-                            onClick={() => setIsModalOpen(false)}
+                            onClick={handleCloseModal}
                             className="p-2 hover:bg-gray-800 rounded-full text-gray-400 hover:text-white transition-colors"
                         >
                             <X className="w-5 h-5" />
@@ -2025,7 +2159,6 @@ export default function Home() {
                 })
              )}
           </div>
-        </div>
       </div>
 
       {/* Reduce Holding Modal */}
@@ -2166,6 +2299,6 @@ export default function Home() {
           </div>
         </div>
       )}
-    </main>
+    </div>
   );
 }
