@@ -903,6 +903,9 @@ export default function Home() {
 
   // Aggregate chart data based on period
   const aggregatedChartData = useMemo(() => {
+    // Detect if mobile
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+    
     if (!historyData || historyData.length === 0) {
          // Guest fallback if simulation fails or pending
          if (!isAuthenticated && holdings.length > 0) {
@@ -917,6 +920,10 @@ export default function Home() {
     }
     
     if (chartPeriod === 'daily') {
+      // On mobile, only show last 30 days for daily view
+      if (isMobile && historyData.length > 30) {
+        return historyData.slice(-30);
+      }
       return historyData;
     }
     
@@ -1480,9 +1487,11 @@ export default function Home() {
                                 </defs>
                                 <XAxis 
                                     dataKey={chartPeriod === 'monthly' ? 'label' : 'date'}
-                                    tick={{fill: '#6b7280', fontSize: 12}} 
+                                    tick={{fill: '#6b7280', fontSize: 10}} 
                                     tickLine={false}
                                     axisLine={false}
+                                    interval={chartPeriod === 'daily' ? 'preserveStartEnd' : 0}
+                                    minTickGap={20}
                                     tickFormatter={(str: string) => {
                                         if (chartPeriod === 'monthly') return str;
                                         const date = new Date(str);

@@ -106,7 +106,16 @@ export default function Navbar() {
           </div>
 
           {/* Mobile menu button */}
-          <div className="md:hidden flex items-center">
+          <div className="md:hidden flex items-center space-x-2">
+            {/* Add Transaction Button - Always Visible on Mobile */}
+            <button
+              onClick={() => openAddModal()}
+              className="flex items-center justify-center p-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-all active:scale-95 shadow-md"
+              title="Yeni İşlem Ekle"
+            >
+              <Plus className="h-5 w-5" />
+            </button>
+            
             <button
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
               className="inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-white hover:bg-gray-800 focus:outline-none"
