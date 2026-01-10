@@ -142,3 +142,130 @@ def validate_fund(code: str):
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Fund {code_upper} not found on TEFAS: {str(e)}")
 
+# ============ Admin Endpoints ============
+
+def get_admin_user(current_user: models.User = Depends(get_current_user)):
+    """Dependency to verify user is an admin."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return current_user
+
+@app.get("/admin/stats", response_model=schemas.AdminStatsResponse)
+def admin_get_stats(
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(get_admin_user)
+):
+    """Get system-wide statistics."""
+    return crud.get_admin_stats(db)
+
+@app.get("/admin/users", response_model=List[schemas.UserAdminResponse])
+def admin_get_users(
+    skip: int = 0,
+    limit: int = 50,
+    search: str = None,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(get_admin_user)
+):
+    """Get all users with pagination and search."""
+    return crud.get_all_users(db, skip=skip, limit=limit, search=search)
+
+@app.get("/admin/users/{user_id}", response_model=schemas.UserAdminResponse)
+def admin_get_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(get_admin_user)
+):
+    """Get a specific user by ID."""
+    user = crud.get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Get holdings info
+    holdings = db.query(models.Holding).filter(models.Holding.user_id == user_id).all()
+    total_value = 0.0
+    for h in holdings:
+        asset = db.query(models.Asset).filter(models.Asset.symbol == h.symbol).first()
+        if asset and asset.last_price:
+            total_value += h.quantity * asset.last_price
+    
+    return {
+        "id": user.id,
+        "email": user.email,
+        "is_verified": user.is_verified,
+        "is_admin": user.is_admin,
+        "last_login": user.last_login,
+        "created_at": user.created_at,
+        "holdings_count": len(holdings),
+        "total_portfolio_value": total_value
+    }
+
+@app.put("/admin/users/{user_id}", response_model=schemas.UserAdminResponse)
+def admin_update_user(
+    user_id: int,
+    update_data: schemas.UserUpdateRequest,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(get_admin_user)
+):
+    """Update a user's details."""
+    user = crud.update_user_admin(db, user_id, update_data)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Get holdings info for response
+    holdings = db.query(models.Holding).filter(models.Holding.user_id == user_id).all()
+    total_value = 0.0
+    for h in holdings:
+        asset = db.query(models.Asset).filter(models.Asset.symbol == h.symbol).first()
+        if asset and asset.last_price:
+            total_value += h.quantity * asset.last_price
+    
+    return {
+        "id": user.id,
+        "email": user.email,
+        "is_verified": user.is_verified,
+        "is_admin": user.is_admin,
+        "last_login": user.last_login,
+        "created_at": user.created_at,
+        "holdings_count": len(holdings),
+        "total_portfolio_value": total_value
+    }
+
+@app.delete("/admin/users/{user_id}")
+def admin_delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(get_admin_user)
+):
+    """Delete a user and all their data."""
+    if user_id == admin.id:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+    
+    success = crud.delete_user_admin(db, user_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return {"message": "User deleted successfully"}
+
+@app.get("/admin/activity", response_model=List[schemas.ActivityLogResponse])
+def admin_get_activity(
+    skip: int = 0,
+    limit: int = 100,
+    user_id: int = None,
+    action: str = None,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(get_admin_user)
+):
+    """Get activity logs with optional filters."""
+    return crud.get_activity_logs(db, skip=skip, limit=limit, user_id=user_id, action=action)
+
+@app.get("/admin/holdings", response_model=List[schemas.HoldingAdminResponse])
+def admin_get_holdings(
+    skip: int = 0,
+    limit: int = 100,
+    symbol: str = None,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(get_admin_user)
+):
+    """Get all holdings across all users."""
+    return crud.get_all_holdings_admin(db, skip=skip, limit=limit, symbol=symbol)
+

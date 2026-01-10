@@ -88,3 +88,57 @@ class SimulationItem(BaseModel):
 
 class SimulationRequest(BaseModel):
     items: List[SimulationItem]
+
+# ============ Admin Schemas ============
+
+class UserAdminResponse(BaseModel):
+    id: int
+    email: str
+    is_verified: bool
+    is_admin: bool
+    last_login: Optional[datetime] = None
+    created_at: datetime
+    holdings_count: int = 0
+    total_portfolio_value: float = 0.0
+
+    class Config:
+        from_attributes = True
+
+class UserUpdateRequest(BaseModel):
+    email: Optional[EmailStr] = None
+    is_verified: Optional[bool] = None
+    is_admin: Optional[bool] = None
+
+class ActivityLogResponse(BaseModel):
+    id: int
+    user_id: Optional[int] = None
+    user_email: Optional[str] = None
+    action: str
+    details: Optional[str] = None
+    ip_address: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class AdminStatsResponse(BaseModel):
+    total_users: int
+    verified_users: int
+    active_today: int
+    total_holdings: int
+    total_portfolio_value: float
+    total_assets_tracked: int
+    recent_registrations: int  # Last 7 days
+
+class HoldingAdminResponse(BaseModel):
+    id: int
+    user_id: int
+    user_email: str
+    symbol: str
+    quantity: float
+    average_cost: float
+    current_value: float = 0.0
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, Text
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from database import Base
@@ -11,11 +11,14 @@ class User(Base):
     hashed_password = Column(String, nullable=True)  # null for Google-only users
     google_id = Column(String, nullable=True, unique=True)
     is_verified = Column(Boolean, default=False)
+    is_admin = Column(Boolean, default=False)  # Admin flag
+    last_login = Column(DateTime, nullable=True)  # Last login timestamp
     reset_token = Column(String, nullable=True)
     reset_token_expiry = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
-    holdings = relationship("Holding", back_populates="user")
+    holdings = relationship("Holding", back_populates="user", cascade="all, delete-orphan")
+    activity_logs = relationship("ActivityLog", back_populates="user", cascade="all, delete-orphan")
 
 class Asset(Base):
     __tablename__ = "assets"
@@ -34,5 +37,18 @@ class Holding(Base):
     symbol = Column(String, index=True)  # Removed unique constraint - multiple users can hold same symbol
     quantity = Column(Float, default=0.0)
     average_cost = Column(Float, default=0.0)
+    created_at = Column(DateTime, default=datetime.utcnow)
     
     user = relationship("User", back_populates="holdings")
+
+class ActivityLog(Base):
+    __tablename__ = "activity_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Nullable for system actions
+    action = Column(String, nullable=False)  # LOGIN, LOGOUT, ADD_HOLDING, REMOVE_HOLDING, REGISTER, etc.
+    details = Column(Text, nullable=True)  # JSON string with additional info
+    ip_address = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    
+    user = relationship("User", back_populates="activity_logs")

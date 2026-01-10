@@ -937,3 +937,183 @@ def simulate_portfolio(request: schemas.SimulationRequest):
         "history": history_json,
         "holdings": simulated_holdings
     }
+
+# ============ Admin Functions ============
+
+def log_activity(db: Session, user_id: int = None, action: str = "", details: str = None, ip_address: str = None):
+    """Log user activity to the database."""
+    log = models.ActivityLog(
+        user_id=user_id,
+        action=action,
+        details=details,
+        ip_address=ip_address
+    )
+    db.add(log)
+    db.commit()
+    return log
+
+def get_admin_stats(db: Session):
+    """Get system-wide statistics for admin dashboard."""
+    from datetime import timedelta
+    
+    total_users = db.query(models.User).count()
+    verified_users = db.query(models.User).filter(models.User.is_verified == True).count()
+    
+    # Active today (logged in within last 24 hours)
+    today = datetime.utcnow() - timedelta(days=1)
+    active_today = db.query(models.User).filter(models.User.last_login >= today).count()
+    
+    # Holdings stats
+    total_holdings = db.query(models.Holding).count()
+    
+    # Total portfolio value calculation
+    total_portfolio_value = 0.0
+    holdings = db.query(models.Holding).all()
+    for h in holdings:
+        asset = db.query(models.Asset).filter(models.Asset.symbol == h.symbol).first()
+        if asset and asset.last_price:
+            total_portfolio_value += h.quantity * asset.last_price
+    
+    # Assets tracked
+    total_assets = db.query(models.Asset).count()
+    
+    # Recent registrations (last 7 days)
+    week_ago = datetime.utcnow() - timedelta(days=7)
+    recent_registrations = db.query(models.User).filter(models.User.created_at >= week_ago).count()
+    
+    return {
+        "total_users": total_users,
+        "verified_users": verified_users,
+        "active_today": active_today,
+        "total_holdings": total_holdings,
+        "total_portfolio_value": total_portfolio_value,
+        "total_assets_tracked": total_assets,
+        "recent_registrations": recent_registrations
+    }
+
+def get_all_users(db: Session, skip: int = 0, limit: int = 50, search: str = None):
+    """Get all users with pagination and optional search."""
+    query = db.query(models.User)
+    
+    if search:
+        query = query.filter(models.User.email.ilike(f"%{search}%"))
+    
+    users = query.order_by(models.User.created_at.desc()).offset(skip).limit(limit).all()
+    
+    result = []
+    for user in users:
+        # Calculate holdings count and total value
+        holdings = db.query(models.Holding).filter(models.Holding.user_id == user.id).all()
+        holdings_count = len(holdings)
+        total_value = 0.0
+        
+        for h in holdings:
+            asset = db.query(models.Asset).filter(models.Asset.symbol == h.symbol).first()
+            if asset and asset.last_price:
+                total_value += h.quantity * asset.last_price
+        
+        result.append({
+            "id": user.id,
+            "email": user.email,
+            "is_verified": user.is_verified,
+            "is_admin": user.is_admin,
+            "last_login": user.last_login,
+            "created_at": user.created_at,
+            "holdings_count": holdings_count,
+            "total_portfolio_value": total_value
+        })
+    
+    return result
+
+def get_user_by_id(db: Session, user_id: int):
+    """Get a specific user by ID."""
+    return db.query(models.User).filter(models.User.id == user_id).first()
+
+def update_user_admin(db: Session, user_id: int, update_data: schemas.UserUpdateRequest):
+    """Admin update user details."""
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        return None
+    
+    if update_data.email is not None:
+        user.email = update_data.email
+    if update_data.is_verified is not None:
+        user.is_verified = update_data.is_verified
+    if update_data.is_admin is not None:
+        user.is_admin = update_data.is_admin
+    
+    db.commit()
+    db.refresh(user)
+    return user
+
+def delete_user_admin(db: Session, user_id: int):
+    """Admin delete a user and all their data."""
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        return False
+    
+    db.delete(user)
+    db.commit()
+    return True
+
+def get_activity_logs(db: Session, skip: int = 0, limit: int = 100, user_id: int = None, action: str = None):
+    """Get activity logs with optional filters."""
+    query = db.query(models.ActivityLog)
+    
+    if user_id:
+        query = query.filter(models.ActivityLog.user_id == user_id)
+    if action:
+        query = query.filter(models.ActivityLog.action == action)
+    
+    logs = query.order_by(models.ActivityLog.created_at.desc()).offset(skip).limit(limit).all()
+    
+    result = []
+    for log in logs:
+        user_email = None
+        if log.user_id:
+            user = db.query(models.User).filter(models.User.id == log.user_id).first()
+            if user:
+                user_email = user.email
+        
+        result.append({
+            "id": log.id,
+            "user_id": log.user_id,
+            "user_email": user_email,
+            "action": log.action,
+            "details": log.details,
+            "ip_address": log.ip_address,
+            "created_at": log.created_at
+        })
+    
+    return result
+
+def get_all_holdings_admin(db: Session, skip: int = 0, limit: int = 100, symbol: str = None):
+    """Get all holdings across all users for admin view."""
+    query = db.query(models.Holding)
+    
+    if symbol:
+        query = query.filter(models.Holding.symbol.ilike(f"%{symbol}%"))
+    
+    holdings = query.offset(skip).limit(limit).all()
+    
+    result = []
+    for h in holdings:
+        user = db.query(models.User).filter(models.User.id == h.user_id).first()
+        asset = db.query(models.Asset).filter(models.Asset.symbol == h.symbol).first()
+        
+        current_value = 0.0
+        if asset and asset.last_price:
+            current_value = h.quantity * asset.last_price
+        
+        result.append({
+            "id": h.id,
+            "user_id": h.user_id,
+            "user_email": user.email if user else "Unknown",
+            "symbol": h.symbol,
+            "quantity": h.quantity,
+            "average_cost": h.average_cost,
+            "current_value": current_value,
+            "created_at": h.created_at if hasattr(h, 'created_at') else None
+        })
+    
+    return result
