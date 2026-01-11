@@ -312,6 +312,9 @@ def create_holding(db: Session, holding: schemas.HoldingCreate, user_id: int):
     }
 
 def delete_holding(db: Session, holding_id: int, user_id: int):
+    from datetime import timedelta
+    TURKEY_OFFSET = timedelta(hours=3)
+    
     holding = db.query(models.Holding).filter(
         models.Holding.id == holding_id,
         models.Holding.user_id == user_id
@@ -319,12 +322,35 @@ def delete_holding(db: Session, holding_id: int, user_id: int):
     if not holding:
         raise HTTPException(status_code=404, detail="Holding not found or access denied")
     
+    # Record removal transaction for timeline
+    try:
+        asset = get_asset(db, holding.symbol)
+        current_holdings = get_holdings(db, user_id)
+        portfolio_value = sum(h.get('total_value_try', 0) for h in current_holdings)
+        
+        # Create removal transaction (negative quantity)
+        transaction = models.PortfolioTransaction(
+            user_id=user_id,
+            symbol=holding.symbol,
+            asset_name=asset.name if asset else holding.symbol,
+            quantity=-holding.quantity,  # Negative for removal
+            unit_cost=holding.average_cost,
+            total_cost=-(holding.quantity * holding.average_cost),  # Negative
+            portfolio_value_at_time=portfolio_value
+        )
+        db.add(transaction)
+    except:
+        pass
+    
     db.delete(holding)
     db.commit()
     return {"ok": True}
 
 def reduce_holding(db: Session, holding_id: int, quantity: float, user_id: int):
     """Reduce the quantity of a holding by a specified amount."""
+    from datetime import timedelta
+    TURKEY_OFFSET = timedelta(hours=3)
+    
     holding = db.query(models.Holding).filter(
         models.Holding.id == holding_id,
         models.Holding.user_id == user_id
@@ -334,6 +360,26 @@ def reduce_holding(db: Session, holding_id: int, quantity: float, user_id: int):
     
     if quantity > holding.quantity:
         raise HTTPException(status_code=400, detail="Cannot reduce more than current quantity")
+    
+    # Record reduction transaction for timeline
+    try:
+        asset = get_asset(db, holding.symbol)
+        current_holdings = get_holdings(db, user_id)
+        portfolio_value = sum(h.get('total_value_try', 0) for h in current_holdings)
+        
+        # Create reduction transaction (negative quantity)
+        transaction = models.PortfolioTransaction(
+            user_id=user_id,
+            symbol=holding.symbol,
+            asset_name=asset.name if asset else holding.symbol,
+            quantity=-quantity,  # Negative for reduction
+            unit_cost=holding.average_cost,
+            total_cost=-(quantity * holding.average_cost),  # Negative
+            portfolio_value_at_time=portfolio_value
+        )
+        db.add(transaction)
+    except:
+        pass
     
     if quantity == holding.quantity:
         # Delete the holding completely
@@ -347,6 +393,7 @@ def reduce_holding(db: Session, holding_id: int, quantity: float, user_id: int):
     db.refresh(holding)
     
     return {"ok": True, "remaining_quantity": holding.quantity}
+
 
 def update_holding_cost(db: Session, holding_id: int, average_cost: float, user_id: int):
     """Update the average cost of a holding."""
@@ -1223,7 +1270,7 @@ def get_portfolio_timeline(db: Session, user_id: int):
             "transaction_count": entry["transaction_count"]
         })
     
-    # Add current portfolio value as final point (today)
+    # Add current portfolio value for today (if not already in the data)
     try:
         current_holdings = get_holdings(db, user_id)
         current_value = sum(h.get('total_value_try', 0) for h in current_holdings)
@@ -1232,16 +1279,25 @@ def get_portfolio_timeline(db: Session, user_id: int):
         now_turkey = datetime.utcnow() + TURKEY_OFFSET
         today_key = now_turkey.strftime('%Y-%m-%d')
         
-        # Only add if we don't have today's data or value is different
-        if timeline:
-            last_date = timeline[-1]['date']
-            if last_date != today_key and abs(current_value - timeline[-1]['value']) > 1:
-                timeline.append({
-                    "date": today_key,
-                    "value": current_value,
-                    "transactions": [],
-                    "transaction_count": 0
-                })
+        # Check if today's date already exists in the data
+        existing_today = False
+        for i, point in enumerate(timeline):
+            if point['date'] == today_key:
+                # Update today's value to current portfolio value
+                timeline[i]["value"] = current_value
+                existing_today = True
+                break
+        
+        # If today doesn't exist, add it
+        if not existing_today:
+            timeline.append({
+                "date": today_key,
+                "value": current_value,
+                "transactions": [],
+                "transaction_count": 0
+            })
+            # Re-sort timeline by date to handle any future dates
+            timeline = sorted(timeline, key=lambda x: x['date'])
     except:
         pass
     

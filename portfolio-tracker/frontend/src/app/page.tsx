@@ -403,37 +403,43 @@ export default function Home() {
   // Timeline chart state
   const [timelineData, setTimelineData] = useState<any>({ timeline: [], transactions: [] });
   const [selectedTransaction, setSelectedTransaction] = useState<any>(null);
+  const [timelineLoading, setTimelineLoading] = useState(true);
 
   const fetchHistory = async () => {
       if (!accessToken) return;
+      setTimelineLoading(true);
       try {
-          const res = await fetch(`${API_BASE_URL}/portfolio/history`, {
-            headers: { 'Authorization': `Bearer ${accessToken}` }
-          });
-          if (res.ok) {
-              const data = await res.json();
+          // Fetch all data in parallel for faster loading
+          const [historyRes, statsRes, timelineRes] = await Promise.all([
+              fetch(`${API_BASE_URL}/portfolio/history`, {
+                headers: { 'Authorization': `Bearer ${accessToken}` }
+              }),
+              fetch(`${API_BASE_URL}/portfolio/stats`, {
+                headers: { 'Authorization': `Bearer ${accessToken}` }
+              }),
+              fetch(`${API_BASE_URL}/portfolio/timeline`, {
+                headers: { 'Authorization': `Bearer ${accessToken}` }
+              })
+          ]);
+          
+          if (historyRes.ok) {
+              const data = await historyRes.json();
               setHistoryData(data);
           }
           
-          // Fetch Stats
-          const statsRes = await fetch(`${API_BASE_URL}/portfolio/stats`, {
-            headers: { 'Authorization': `Bearer ${accessToken}` }
-          });
           if (statsRes.ok) {
               const statsData = await statsRes.json();
               setPortfolioStats(statsData);
           }
           
-          // Fetch Timeline for progress chart
-          const timelineRes = await fetch(`${API_BASE_URL}/portfolio/timeline`, {
-            headers: { 'Authorization': `Bearer ${accessToken}` }
-          });
           if (timelineRes.ok) {
               const timelineDataRes = await timelineRes.json();
               setTimelineData(timelineDataRes);
           }
       } catch (e) {
           console.error("Failed to fetch history/stats/timeline");
+      } finally {
+          setTimelineLoading(false);
       }
   };
 
@@ -1590,59 +1596,28 @@ export default function Home() {
             </div>
         )}
         
-        {/* Portfolio Progress Chart - Empty State (Initialize) */}
-        {isAuthenticated && timelineData.timeline.length === 0 && holdings.length > 0 && (
+        {/* Portfolio Progress Chart - Loading State */}
+        {isAuthenticated && timelineLoading && holdings.length > 0 && (
             <div className="bg-gray-900 p-6 rounded-2xl border border-gray-800 shadow-xl">
                 <div className="flex items-center justify-between mb-4">
                     <h3 className="text-lg font-bold text-gray-200 flex items-center">
-                        <Plus className="w-5 h-5 mr-2 text-green-500" />
+                        <TrendingUp className="w-5 h-5 mr-2 text-green-500" />
                         Portföy İlerlemesi
                     </h3>
                 </div>
-                <div className="flex flex-col items-center justify-center py-12 text-center">
-                    <div className="w-16 h-16 bg-green-500/10 rounded-full flex items-center justify-center mb-4">
-                        <TrendingUp className="w-8 h-8 text-green-500" />
-                    </div>
-                    <h4 className="text-white font-semibold mb-2">İşlem Kaydı Yok</h4>
-                    <p className="text-gray-400 text-sm mb-4 max-w-xs">
-                        Mevcut varlıklarınıza göre portföy ilerlemesi grafiğini başlatın. Bundan sonra eklenen varlıklar grafik üzerinde görünecek.
-                    </p>
-                    <button
-                        onClick={async () => {
-                            try {
-                                const res = await fetch(`${API_BASE_URL}/portfolio/timeline/reset`, {
-                                    method: 'POST',
-                                    headers: { 'Authorization': `Bearer ${accessToken}` }
-                                });
-                                if (res.ok) {
-                                    // Refresh timeline data
-                                    const timelineRes = await fetch(`${API_BASE_URL}/portfolio/timeline`, {
-                                        headers: { 'Authorization': `Bearer ${accessToken}` }
-                                    });
-                                    if (timelineRes.ok) {
-                                        const data = await timelineRes.json();
-                                        setTimelineData(data);
-                                    }
-                                }
-                            } catch (e) {
-                                console.error('Failed to initialize timeline');
-                            }
-                        }}
-                        className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white font-medium rounded-lg transition-colors flex items-center gap-2"
-                    >
-                        <Plus className="w-4 h-4" />
-                        Grafiği Başlat
-                    </button>
+                <div className="flex flex-col items-center justify-center py-12">
+                    <RefreshCw className="w-8 h-8 text-green-500 animate-spin mb-3" />
+                    <p className="text-gray-400 text-sm">Veriler yükleniyor...</p>
                 </div>
             </div>
         )}
 
         {/* Portfolio Progress Chart - Transaction Timeline */}
         {isAuthenticated && timelineData.timeline.length > 0 && (
-            <div className="bg-gray-900 p-6 rounded-2xl border border-gray-800 shadow-xl">
-                <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-bold text-gray-200 flex items-center">
-                        <Plus className="w-5 h-5 mr-2 text-green-500" />
+            <div className="bg-gray-900 p-4 md:p-6 rounded-2xl border border-gray-800 shadow-xl">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+                    <h3 className="text-base md:text-lg font-bold text-gray-200 flex items-center">
+                        <TrendingUp className="w-4 h-4 md:w-5 md:h-5 mr-2 text-green-500" />
                         Portföy İlerlemesi
                     </h3>
                     <div className="flex items-center gap-3">
@@ -1679,9 +1654,9 @@ export default function Home() {
                         </button>
                     </div>
                 </div>
-                <div className="h-[300px] w-full">
+                <div className="h-[250px] md:h-[300px] w-full">
                     <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={timelineData.timeline}>
+                        <LineChart data={timelineData.timeline} margin={{ top: 5, right: 25, left: 0, bottom: 5 }}>
                             <defs>
                                 <linearGradient id="colorProgress" x1="0" y1="0" x2="0" y2="1">
                                     <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
@@ -1690,15 +1665,20 @@ export default function Home() {
                             </defs>
                             <XAxis 
                                 dataKey="date"
-                                tick={{fill: '#6b7280', fontSize: 10}} 
+                                tick={{fill: '#6b7280', fontSize: 9}} 
                                 tickLine={false}
                                 axisLine={false}
-                                interval="preserveStartEnd"
-                                minTickGap={40}
+                                interval={timelineData.timeline.length <= 7 ? 0 : 'preserveStartEnd'}
+                                minTickGap={20}
+                                padding={{ left: 10, right: 10 }}
                                 tickFormatter={(str: string) => {
+                                    // str format: YYYY-MM-DD
+                                    if (!str) return '';
                                     const parts = str.split('-');
                                     if (parts.length >= 3) {
-                                        return `${parts[2]}/${parts[1]}`;
+                                        const day = parseInt(parts[2], 10);
+                                        const month = parseInt(parts[1], 10);
+                                        return `${day}/${month}`;
                                     }
                                     return str;
                                 }}
@@ -1732,22 +1712,29 @@ export default function Home() {
                                                         <p className="text-[10px] text-gray-500 uppercase tracking-wider">
                                                             {data.transaction_count} işlem
                                                         </p>
-                                                        {data.transactions.slice(0, 3).map((tx: any) => (
-                                                            <div 
-                                                                key={tx.id} 
-                                                                className="flex justify-between items-center text-xs cursor-pointer hover:bg-gray-800 rounded px-1 py-0.5 -mx-1"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    setSelectedTransaction(tx);
-                                                                }}
-                                                            >
-                                                                <span className="text-green-400 font-medium">+{tx.symbol}</span>
-                                                                <span className="text-gray-500">{tx.quantity.toFixed(2)} adet</span>
-                                                            </div>
-                                                        ))}
-                                                        {data.transactions.length > 3 && (
+                                                        {data.transactions.slice(0, 4).map((tx: any) => {
+                                                            const isRemoval = tx.quantity < 0;
+                                                            return (
+                                                                <div 
+                                                                    key={tx.id} 
+                                                                    className="flex justify-between items-center text-xs cursor-pointer hover:bg-gray-800 rounded px-1 py-0.5 -mx-1"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setSelectedTransaction(tx);
+                                                                    }}
+                                                                >
+                                                                    <span className={isRemoval ? "text-red-400 font-medium" : "text-green-400 font-medium"}>
+                                                                        {isRemoval ? '−' : '+'}{tx.symbol}
+                                                                    </span>
+                                                                    <span className="text-gray-500">
+                                                                        {Math.abs(tx.quantity).toFixed(2)} adet
+                                                                    </span>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                        {data.transactions.length > 4 && (
                                                             <p className="text-[10px] text-gray-500 italic">
-                                                                +{data.transactions.length - 3} daha...
+                                                                +{data.transactions.length - 4} daha...
                                                             </p>
                                                         )}
                                                     </div>
@@ -1804,20 +1791,23 @@ export default function Home() {
                     </ResponsiveContainer>
                 </div>
                 {/* Transaction Legend - Recent transactions */}
-                <div className="mt-4 flex flex-wrap gap-2">
-                    {timelineData.transactions.slice(-5).reverse().map((tx: any) => (
-                        <button
-                            key={tx.id}
-                            onClick={() => setSelectedTransaction(tx)}
-                            className="flex items-center text-xs bg-gray-800/50 hover:bg-gray-700/50 px-3 py-1.5 rounded-full transition-colors border border-gray-700"
-                        >
-                            <div className="w-2 h-2 rounded-full bg-green-500 mr-2"></div>
-                            <span className="text-gray-300 font-medium">{tx.symbol}</span>
-                            <span className="text-gray-500 ml-1.5">
-                                +{tx.quantity.toFixed(2)}
-                            </span>
-                        </button>
-                    ))}
+                <div className="mt-3 md:mt-4 flex flex-wrap gap-1.5 md:gap-2">
+                    {timelineData.transactions.slice(-5).reverse().map((tx: any) => {
+                        const isRemoval = tx.quantity < 0;
+                        return (
+                            <button
+                                key={tx.id}
+                                onClick={() => setSelectedTransaction(tx)}
+                                className="flex items-center text-[10px] md:text-xs bg-gray-800/50 hover:bg-gray-700/50 px-2 md:px-3 py-1 md:py-1.5 rounded-full transition-colors border border-gray-700"
+                            >
+                                <div className={`w-1.5 h-1.5 md:w-2 md:h-2 rounded-full mr-1.5 md:mr-2 ${isRemoval ? 'bg-red-500' : 'bg-green-500'}`}></div>
+                                <span className="text-gray-300 font-medium truncate max-w-[60px] md:max-w-none">{tx.symbol}</span>
+                                <span className={`ml-1 md:ml-1.5 ${isRemoval ? 'text-red-400' : 'text-gray-500'}`}>
+                                    {isRemoval ? '−' : '+'}{Math.abs(tx.quantity).toFixed(1)}
+                                </span>
+                            </button>
+                        );
+                    })}
                 </div>
             </div>
         )}
@@ -1826,10 +1816,14 @@ export default function Home() {
         {selectedTransaction && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm" onClick={() => setSelectedTransaction(null)}>
                 <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
-                    <div className="p-4 border-b border-gray-800 flex justify-between items-center bg-green-500/10">
+                    <div className={`p-4 border-b border-gray-800 flex justify-between items-center ${selectedTransaction.quantity < 0 ? 'bg-red-500/10' : 'bg-green-500/10'}`}>
                         <h3 className="font-bold text-lg text-white flex items-center">
-                            <Plus className="w-5 h-5 mr-2 text-green-500" />
-                            İşlem Detayı
+                            {selectedTransaction.quantity < 0 ? (
+                                <Minus className="w-5 h-5 mr-2 text-red-500" />
+                            ) : (
+                                <Plus className="w-5 h-5 mr-2 text-green-500" />
+                            )}
+                            {selectedTransaction.quantity < 0 ? 'Satış/Silme Detayı' : 'Alış Detayı'}
                         </h3>
                         <button onClick={() => setSelectedTransaction(null)} className="p-1 hover:bg-gray-800 rounded-full transition-colors text-gray-400 hover:text-white">
                             <X className="w-5 h-5" />
@@ -1848,15 +1842,19 @@ export default function Home() {
                         )}
                         <div className="flex justify-between items-center">
                             <span className="text-gray-400 text-sm">Miktar</span>
-                            <span className="text-white font-medium">{selectedTransaction.quantity.toFixed(4)}</span>
+                            <span className={`font-medium ${selectedTransaction.quantity < 0 ? 'text-red-400' : 'text-white'}`}>
+                                {selectedTransaction.quantity < 0 ? '−' : '+'}{Math.abs(selectedTransaction.quantity).toFixed(4)}
+                            </span>
                         </div>
                         <div className="flex justify-between items-center">
                             <span className="text-gray-400 text-sm">Birim Fiyat</span>
                             <span className="text-white font-medium">₺{selectedTransaction.unit_cost.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</span>
                         </div>
                         <div className="flex justify-between items-center pt-2 border-t border-gray-800">
-                            <span className="text-gray-400 text-sm">Toplam Maliyet</span>
-                            <span className="text-green-400 font-bold text-lg">₺{selectedTransaction.total_cost.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</span>
+                            <span className="text-gray-400 text-sm">{selectedTransaction.quantity < 0 ? 'Toplam Satış' : 'Toplam Maliyet'}</span>
+                            <span className={`font-bold text-lg ${selectedTransaction.quantity < 0 ? 'text-red-400' : 'text-green-400'}`}>
+                                {selectedTransaction.quantity < 0 ? '−' : '+'}₺{Math.abs(selectedTransaction.total_cost).toLocaleString('tr-TR', {maximumFractionDigits: 2})}
+                            </span>
                         </div>
                         {selectedTransaction.portfolio_value_at_time && (
                             <div className="flex justify-between items-center">
