@@ -19,6 +19,7 @@ class User(Base):
     
     holdings = relationship("Holding", back_populates="user", cascade="all, delete-orphan")
     activity_logs = relationship("ActivityLog", back_populates="user", cascade="all, delete-orphan")
+    transactions = relationship("PortfolioTransaction", back_populates="user", cascade="all, delete-orphan")
 
 class Asset(Base):
     __tablename__ = "assets"
@@ -52,3 +53,19 @@ class ActivityLog(Base):
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     
     user = relationship("User", back_populates="activity_logs")
+
+class PortfolioTransaction(Base):
+    """Tracks individual asset additions to the portfolio for timeline view."""
+    __tablename__ = "portfolio_transactions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    symbol = Column(String, nullable=False)
+    asset_name = Column(String, nullable=True)
+    quantity = Column(Float, nullable=False)
+    unit_cost = Column(Float, nullable=False)
+    total_cost = Column(Float, nullable=False)
+    portfolio_value_at_time = Column(Float, nullable=True)  # Portfolio value at transaction time
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    
+    user = relationship("User", back_populates="transactions")

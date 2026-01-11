@@ -277,6 +277,25 @@ def create_holding(db: Session, holding: schemas.HoldingCreate, user_id: int):
         )
         db.add(db_holding)
 
+    # 3. Record transaction for timeline
+    # Calculate current portfolio value (approximate)
+    try:
+        current_holdings = get_holdings(db, user_id)
+        portfolio_value = sum(h.get('total_value_try', 0) for h in current_holdings)
+    except:
+        portfolio_value = None
+    
+    transaction = models.PortfolioTransaction(
+        user_id=user_id,
+        symbol=asset.symbol,
+        asset_name=asset.name,
+        quantity=holding.quantity,
+        unit_cost=holding.unit_cost,
+        total_cost=holding.quantity * holding.unit_cost,
+        portfolio_value_at_time=portfolio_value
+    )
+    db.add(transaction)
+
     db.commit()
     db.refresh(db_holding)
     
@@ -1117,3 +1136,164 @@ def get_all_holdings_admin(db: Session, skip: int = 0, limit: int = 100, symbol:
         })
     
     return result
+
+# ============ Portfolio Timeline ============
+
+def get_portfolio_timeline(db: Session, user_id: int):
+    """Get portfolio timeline data with transaction points for the progress chart."""
+    from datetime import timedelta
+    
+    # Turkey timezone offset (UTC+3)
+    TURKEY_OFFSET = timedelta(hours=3)
+    
+    # Get all transactions for this user, ordered by date
+    transactions = db.query(models.PortfolioTransaction).filter(
+        models.PortfolioTransaction.user_id == user_id
+    ).order_by(models.PortfolioTransaction.created_at.asc()).all()
+    
+    if not transactions:
+        return {"timeline": [], "transactions": []}
+    
+    # Build transaction responses
+    transaction_responses = []
+    
+    for tx in transactions:
+        # Convert to Turkey time
+        turkey_time = tx.created_at + TURKEY_OFFSET
+        
+        tx_response = {
+            "id": tx.id,
+            "symbol": tx.symbol,
+            "asset_name": tx.asset_name,
+            "quantity": tx.quantity,
+            "unit_cost": tx.unit_cost,
+            "total_cost": tx.total_cost,
+            "portfolio_value_at_time": tx.portfolio_value_at_time,
+            "created_at": turkey_time.isoformat()
+        }
+        transaction_responses.append(tx_response)
+    
+    # Group transactions by DATE (not datetime) for better chart display
+    daily_data = {}
+    running_value = 0
+    
+    for tx in transactions:
+        # Convert to Turkey time
+        turkey_time = tx.created_at + TURKEY_OFFSET
+        date_key = turkey_time.strftime('%Y-%m-%d')
+        
+        # Update running value
+        if tx.portfolio_value_at_time:
+            running_value = tx.portfolio_value_at_time
+        else:
+            running_value += tx.total_cost
+        
+        # Create tx response with Turkey time
+        tx_response = {
+            "id": tx.id,
+            "symbol": tx.symbol,
+            "asset_name": tx.asset_name,
+            "quantity": tx.quantity,
+            "unit_cost": tx.unit_cost,
+            "total_cost": tx.total_cost,
+            "portfolio_value_at_time": tx.portfolio_value_at_time,
+            "created_at": turkey_time.isoformat()
+        }
+        
+        if date_key not in daily_data:
+            daily_data[date_key] = {
+                "date": date_key,
+                "value": running_value,
+                "transactions": [tx_response],
+                "transaction_count": 1
+            }
+        else:
+            daily_data[date_key]["value"] = running_value
+            daily_data[date_key]["transactions"].append(tx_response)
+            daily_data[date_key]["transaction_count"] += 1
+    
+    # Convert to sorted list
+    timeline = []
+    for date_key in sorted(daily_data.keys()):
+        entry = daily_data[date_key]
+        timeline.append({
+            "date": entry["date"],
+            "value": entry["value"],
+            "transactions": entry["transactions"],
+            "transaction_count": entry["transaction_count"]
+        })
+    
+    # Add current portfolio value as final point (today)
+    try:
+        current_holdings = get_holdings(db, user_id)
+        current_value = sum(h.get('total_value_try', 0) for h in current_holdings)
+        
+        # Get today's date in Turkey time
+        now_turkey = datetime.utcnow() + TURKEY_OFFSET
+        today_key = now_turkey.strftime('%Y-%m-%d')
+        
+        # Only add if we don't have today's data or value is different
+        if timeline:
+            last_date = timeline[-1]['date']
+            if last_date != today_key and abs(current_value - timeline[-1]['value']) > 1:
+                timeline.append({
+                    "date": today_key,
+                    "value": current_value,
+                    "transactions": [],
+                    "transaction_count": 0
+                })
+    except:
+        pass
+    
+    return {
+        "timeline": timeline,
+        "transactions": transaction_responses
+    }
+
+def reset_portfolio_timeline(db: Session, user_id: int):
+    """Reset timeline by deleting all transactions and creating new ones from current holdings."""
+    # 1. Delete all existing transactions for this user
+    db.query(models.PortfolioTransaction).filter(
+        models.PortfolioTransaction.user_id == user_id
+    ).delete()
+    db.commit()
+    
+    # 2. Get current holdings
+    holdings = db.query(models.Holding).filter(models.Holding.user_id == user_id).all()
+    
+    if not holdings:
+        return {"message": "No holdings to reset", "transactions_created": 0}
+    
+    # 3. Calculate current portfolio value
+    current_value = 0
+    for h in holdings:
+        asset = get_asset(db, h.symbol)
+        if asset and asset.last_price:
+            # Determine if USD asset
+            is_usd = "-USD" in h.symbol or "=" in h.symbol
+            val = h.quantity * asset.last_price
+            if is_usd:
+                usd_rate = get_usd_try_rate()
+                val *= usd_rate
+            current_value += val
+    
+    # 4. Create new transactions for each holding (as if they were all added now)
+    count = 0
+    for h in holdings:
+        asset = get_asset(db, h.symbol)
+        
+        transaction = models.PortfolioTransaction(
+            user_id=user_id,
+            symbol=h.symbol,
+            asset_name=asset.name if asset else h.symbol,
+            quantity=h.quantity,
+            unit_cost=h.average_cost,
+            total_cost=h.quantity * h.average_cost,
+            portfolio_value_at_time=current_value
+        )
+        db.add(transaction)
+        count += 1
+    
+    db.commit()
+    
+    return {"message": "Timeline reset successfully", "transactions_created": count}

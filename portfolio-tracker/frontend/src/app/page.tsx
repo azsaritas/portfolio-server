@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Plus, Minus, RefreshCw, TrendingUp, TrendingDown, Search, Wallet, ArrowUpRight, ArrowDownRight, Trash2, X, PieChart as PieChartIcon, ChevronDown, ChevronRight, ArrowUp, ArrowDown, Pencil, MoreVertical, LogOut, User, LogIn, AlertCircle, Trophy, Sparkles } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useUI } from '@/context/UIContext';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Sector } from 'recharts';
+import { AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Sector, ReferenceDot } from 'recharts';
 import { BIST_STOCKS } from '@/data/bist_stocks';
 import { CRYPTO_COINS } from '@/data/crypto_coins';
 import { METALS } from '@/data/metals';
@@ -399,6 +399,10 @@ export default function Home() {
   const [activeTotalModal, setActiveTotalModal] = useState<'VALUE' | 'PL' | null>(null);
   const [activePeriod, setActivePeriod] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('daily');
   const [chartPeriod, setChartPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
+  
+  // Timeline chart state
+  const [timelineData, setTimelineData] = useState<any>({ timeline: [], transactions: [] });
+  const [selectedTransaction, setSelectedTransaction] = useState<any>(null);
 
   const fetchHistory = async () => {
       if (!accessToken) return;
@@ -419,8 +423,17 @@ export default function Home() {
               const statsData = await statsRes.json();
               setPortfolioStats(statsData);
           }
+          
+          // Fetch Timeline for progress chart
+          const timelineRes = await fetch(`${API_BASE_URL}/portfolio/timeline`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+          if (timelineRes.ok) {
+              const timelineDataRes = await timelineRes.json();
+              setTimelineData(timelineDataRes);
+          }
       } catch (e) {
-          console.error("Failed to fetch history/stats");
+          console.error("Failed to fetch history/stats/timeline");
       }
   };
 
@@ -1572,6 +1585,289 @@ export default function Home() {
                                 {entry.symbol} {((entry.total_value_try / totalPortfolioValue) * 100).toFixed(0)}%
                             </div>
                         ))}
+                    </div>
+                </div>
+            </div>
+        )}
+        
+        {/* Portfolio Progress Chart - Empty State (Initialize) */}
+        {isAuthenticated && timelineData.timeline.length === 0 && holdings.length > 0 && (
+            <div className="bg-gray-900 p-6 rounded-2xl border border-gray-800 shadow-xl">
+                <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-bold text-gray-200 flex items-center">
+                        <Plus className="w-5 h-5 mr-2 text-green-500" />
+                        Portföy İlerlemesi
+                    </h3>
+                </div>
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <div className="w-16 h-16 bg-green-500/10 rounded-full flex items-center justify-center mb-4">
+                        <TrendingUp className="w-8 h-8 text-green-500" />
+                    </div>
+                    <h4 className="text-white font-semibold mb-2">İşlem Kaydı Yok</h4>
+                    <p className="text-gray-400 text-sm mb-4 max-w-xs">
+                        Mevcut varlıklarınıza göre portföy ilerlemesi grafiğini başlatın. Bundan sonra eklenen varlıklar grafik üzerinde görünecek.
+                    </p>
+                    <button
+                        onClick={async () => {
+                            try {
+                                const res = await fetch(`${API_BASE_URL}/portfolio/timeline/reset`, {
+                                    method: 'POST',
+                                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                                });
+                                if (res.ok) {
+                                    // Refresh timeline data
+                                    const timelineRes = await fetch(`${API_BASE_URL}/portfolio/timeline`, {
+                                        headers: { 'Authorization': `Bearer ${accessToken}` }
+                                    });
+                                    if (timelineRes.ok) {
+                                        const data = await timelineRes.json();
+                                        setTimelineData(data);
+                                    }
+                                }
+                            } catch (e) {
+                                console.error('Failed to initialize timeline');
+                            }
+                        }}
+                        className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white font-medium rounded-lg transition-colors flex items-center gap-2"
+                    >
+                        <Plus className="w-4 h-4" />
+                        Grafiği Başlat
+                    </button>
+                </div>
+            </div>
+        )}
+
+        {/* Portfolio Progress Chart - Transaction Timeline */}
+        {isAuthenticated && timelineData.timeline.length > 0 && (
+            <div className="bg-gray-900 p-6 rounded-2xl border border-gray-800 shadow-xl">
+                <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-bold text-gray-200 flex items-center">
+                        <Plus className="w-5 h-5 mr-2 text-green-500" />
+                        Portföy İlerlemesi
+                    </h3>
+                    <div className="flex items-center gap-3">
+                        <span className="text-xs text-gray-500">
+                            {timelineData.transactions.length} işlem kaydı
+                        </span>
+                        <button
+                            onClick={async () => {
+                                if (confirm('Tüm işlem geçmişi silinecek ve mevcut varlıklara göre sıfırlanacak. Emin misiniz?')) {
+                                    try {
+                                        const res = await fetch(`${API_BASE_URL}/portfolio/timeline/reset`, {
+                                            method: 'POST',
+                                            headers: { 'Authorization': `Bearer ${accessToken}` }
+                                        });
+                                        if (res.ok) {
+                                            // Refresh timeline data
+                                            const timelineRes = await fetch(`${API_BASE_URL}/portfolio/timeline`, {
+                                                headers: { 'Authorization': `Bearer ${accessToken}` }
+                                            });
+                                            if (timelineRes.ok) {
+                                                const data = await timelineRes.json();
+                                                setTimelineData(data);
+                                            }
+                                        }
+                                    } catch (e) {
+                                        console.error('Failed to reset timeline');
+                                    }
+                                }
+                            }}
+                            className="px-3 py-1.5 text-xs font-medium text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors flex items-center gap-1.5"
+                        >
+                            <RefreshCw className="w-3 h-3" />
+                            Sıfırla
+                        </button>
+                    </div>
+                </div>
+                <div className="h-[300px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={timelineData.timeline}>
+                            <defs>
+                                <linearGradient id="colorProgress" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                                    <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                                </linearGradient>
+                            </defs>
+                            <XAxis 
+                                dataKey="date"
+                                tick={{fill: '#6b7280', fontSize: 10}} 
+                                tickLine={false}
+                                axisLine={false}
+                                interval="preserveStartEnd"
+                                minTickGap={40}
+                                tickFormatter={(str: string) => {
+                                    const parts = str.split('-');
+                                    if (parts.length >= 3) {
+                                        return `${parts[2]}/${parts[1]}`;
+                                    }
+                                    return str;
+                                }}
+                            />
+                            <YAxis 
+                                tick={{fill: '#6b7280', fontSize: 12}} 
+                                tickLine={false}
+                                axisLine={false}
+                                tickFormatter={(value: number) => `₺${(value/1000).toFixed(0)}k`}
+                                domain={['auto', 'auto']}
+                            />
+                            <Tooltip 
+                                contentStyle={{backgroundColor: '#111827', borderColor: '#374151', borderRadius: '0.75rem'}}
+                                itemStyle={{color: '#e5e7eb'}}
+                                wrapperStyle={{ zIndex: 100 }}
+                                content={({ active, payload }: any) => {
+                                    if (active && payload && payload.length) {
+                                        const data = payload[0].payload;
+                                        const dateStr = data.date;
+                                        const parts = dateStr.split('-');
+                                        const formattedDate = parts.length >= 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : dateStr;
+                                        
+                                        return (
+                                            <div className="bg-gray-900 border border-gray-700 rounded-xl p-3 shadow-xl max-w-xs">
+                                                <p className="text-xs text-gray-400 mb-1">{formattedDate}</p>
+                                                <p className="text-lg font-bold text-white mb-2">
+                                                    ₺{(data.value || 0).toLocaleString('tr-TR', {maximumFractionDigits: 0})}
+                                                </p>
+                                                {data.transactions && data.transactions.length > 0 && (
+                                                    <div className="border-t border-gray-700 pt-2 space-y-1.5">
+                                                        <p className="text-[10px] text-gray-500 uppercase tracking-wider">
+                                                            {data.transaction_count} işlem
+                                                        </p>
+                                                        {data.transactions.slice(0, 3).map((tx: any) => (
+                                                            <div 
+                                                                key={tx.id} 
+                                                                className="flex justify-between items-center text-xs cursor-pointer hover:bg-gray-800 rounded px-1 py-0.5 -mx-1"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setSelectedTransaction(tx);
+                                                                }}
+                                                            >
+                                                                <span className="text-green-400 font-medium">+{tx.symbol}</span>
+                                                                <span className="text-gray-500">{tx.quantity.toFixed(2)} adet</span>
+                                                            </div>
+                                                        ))}
+                                                        {data.transactions.length > 3 && (
+                                                            <p className="text-[10px] text-gray-500 italic">
+                                                                +{data.transactions.length - 3} daha...
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    }
+                                    return null;
+                                }}
+                            />
+                            <Line 
+                                type="monotone" 
+                                dataKey="value" 
+                                stroke="#10b981" 
+                                strokeWidth={2}
+                                dot={(props: any) => {
+                                    const { cx, cy, payload } = props;
+                                    // Show dot if there are transactions
+                                    if (payload.transaction_count > 0) {
+                                        const size = Math.min(payload.transaction_count * 2 + 4, 10);
+                                        return (
+                                            <circle 
+                                                cx={cx} 
+                                                cy={cy} 
+                                                r={size} 
+                                                fill="#10b981" 
+                                                stroke="#fff" 
+                                                strokeWidth={2}
+                                                style={{ cursor: 'pointer' }}
+                                            />
+                                        );
+                                    }
+                                    return <circle cx={cx} cy={cy} r={3} fill="#10b981" />;
+                                }}
+                                activeDot={(props: any) => {
+                                    const { cx, cy, payload } = props;
+                                    if (payload.transaction_count > 0) {
+                                        return (
+                                            <circle 
+                                                cx={cx} 
+                                                cy={cy} 
+                                                r={10} 
+                                                fill="#10b981" 
+                                                stroke="#fff" 
+                                                strokeWidth={3}
+                                                style={{ cursor: 'pointer' }}
+                                            />
+                                        );
+                                    }
+                                    return <circle cx={cx} cy={cy} r={5} fill="#10b981" />;
+                                }}
+                            />
+                        </LineChart>
+                    </ResponsiveContainer>
+                </div>
+                {/* Transaction Legend - Recent transactions */}
+                <div className="mt-4 flex flex-wrap gap-2">
+                    {timelineData.transactions.slice(-5).reverse().map((tx: any) => (
+                        <button
+                            key={tx.id}
+                            onClick={() => setSelectedTransaction(tx)}
+                            className="flex items-center text-xs bg-gray-800/50 hover:bg-gray-700/50 px-3 py-1.5 rounded-full transition-colors border border-gray-700"
+                        >
+                            <div className="w-2 h-2 rounded-full bg-green-500 mr-2"></div>
+                            <span className="text-gray-300 font-medium">{tx.symbol}</span>
+                            <span className="text-gray-500 ml-1.5">
+                                +{tx.quantity.toFixed(2)}
+                            </span>
+                        </button>
+                    ))}
+                </div>
+            </div>
+        )}
+
+        {/* Transaction Detail Modal */}
+        {selectedTransaction && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm" onClick={() => setSelectedTransaction(null)}>
+                <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
+                    <div className="p-4 border-b border-gray-800 flex justify-between items-center bg-green-500/10">
+                        <h3 className="font-bold text-lg text-white flex items-center">
+                            <Plus className="w-5 h-5 mr-2 text-green-500" />
+                            İşlem Detayı
+                        </h3>
+                        <button onClick={() => setSelectedTransaction(null)} className="p-1 hover:bg-gray-800 rounded-full transition-colors text-gray-400 hover:text-white">
+                            <X className="w-5 h-5" />
+                        </button>
+                    </div>
+                    <div className="p-4 space-y-3">
+                        <div className="flex justify-between items-center">
+                            <span className="text-gray-400 text-sm">Varlık</span>
+                            <span className="text-white font-bold">{selectedTransaction.symbol}</span>
+                        </div>
+                        {selectedTransaction.asset_name && (
+                            <div className="flex justify-between items-center">
+                                <span className="text-gray-400 text-sm">İsim</span>
+                                <span className="text-gray-300 text-sm">{selectedTransaction.asset_name}</span>
+                            </div>
+                        )}
+                        <div className="flex justify-between items-center">
+                            <span className="text-gray-400 text-sm">Miktar</span>
+                            <span className="text-white font-medium">{selectedTransaction.quantity.toFixed(4)}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                            <span className="text-gray-400 text-sm">Birim Fiyat</span>
+                            <span className="text-white font-medium">₺{selectedTransaction.unit_cost.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</span>
+                        </div>
+                        <div className="flex justify-between items-center pt-2 border-t border-gray-800">
+                            <span className="text-gray-400 text-sm">Toplam Maliyet</span>
+                            <span className="text-green-400 font-bold text-lg">₺{selectedTransaction.total_cost.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</span>
+                        </div>
+                        {selectedTransaction.portfolio_value_at_time && (
+                            <div className="flex justify-between items-center">
+                                <span className="text-gray-400 text-sm">O anki Portföy</span>
+                                <span className="text-blue-400 font-medium">₺{selectedTransaction.portfolio_value_at_time.toLocaleString('tr-TR', {maximumFractionDigits: 0})}</span>
+                            </div>
+                        )}
+                        <div className="flex justify-between items-center">
+                            <span className="text-gray-400 text-sm">Tarih</span>
+                            <span className="text-gray-300 text-sm">{new Date(selectedTransaction.created_at).toLocaleString('tr-TR')}</span>
+                        </div>
                     </div>
                 </div>
             </div>

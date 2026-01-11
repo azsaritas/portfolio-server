@@ -116,6 +116,22 @@ def get_portfolio_stats(
 ):
     return crud.get_portfolio_stats(db, user_id=current_user.id)
 
+@app.get("/portfolio/timeline")
+def get_portfolio_timeline(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Get portfolio timeline with transaction points for progress chart."""
+    return crud.get_portfolio_timeline(db, user_id=current_user.id)
+
+@app.post("/portfolio/timeline/reset")
+def reset_portfolio_timeline(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Reset timeline - deletes all transactions and creates new ones from current holdings."""
+    return crud.reset_portfolio_timeline(db, user_id=current_user.id)
+
 @app.post("/refresh")
 def refresh_prices(
     db: Session = Depends(get_db),

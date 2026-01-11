@@ -89,6 +89,26 @@ class SimulationItem(BaseModel):
 class SimulationRequest(BaseModel):
     items: List[SimulationItem]
 
+# ============ Portfolio Timeline Schemas ============
+
+class PortfolioTransactionResponse(BaseModel):
+    id: int
+    symbol: str
+    asset_name: Optional[str] = None
+    quantity: float
+    unit_cost: float
+    total_cost: float
+    portfolio_value_at_time: Optional[float] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class PortfolioTimelinePoint(BaseModel):
+    date: str
+    value: float
+    transaction: Optional[PortfolioTransactionResponse] = None
+
 # ============ Admin Schemas ============
 
 class UserAdminResponse(BaseModel):
