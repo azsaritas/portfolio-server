@@ -1117,3 +1117,171 @@ def get_all_holdings_admin(db: Session, skip: int = 0, limit: int = 100, symbol:
         })
     
     return result
+
+# This logic will be appended to crud.py
+
+def get_portfolio_growth_history(db: Session, user_id: int):
+    # 1. Fetch all transactions for user, sorted by date
+    transactions = db.query(models.Transaction).filter(
+        models.Transaction.user_id == user_id
+    ).order_by(models.Transaction.created_at.asc()).all()
+    
+    if not transactions:
+        return {"history": [], "transactions": []}
+    
+    # 2. Identify date range and assets
+    start_date = transactions[0].created_at.date()
+    end_date = datetime.now().date()
+    
+    all_symbols = set(t.symbol for t in transactions)
+    # Filter valid symbols for YFinance
+    yf_symbols = [s for s in all_symbols if s.endswith(".IS") or s.endswith("-USD") or "=" in s or s == "USDTRY=X"]
+    # Handle crypto/metals without suffixes if needed, based on existing logic
+    
+    # Fetch USD rate history
+    usd_try_hist = yf.download("USDTRY=X", start=start_date, end=end_date + timedelta(days=1), progress=False)['Close']
+    
+    # Fetch Asset Price History
+    # We need price history for ALL symbols from start_date
+    price_history_map = {}
+    
+    # Batch download YFinance
+    if yf_symbols:
+        try:
+            tickers_str = " ".join(yf_symbols)
+            yf_data = yf.download(tickers_str, start=start_date, end=end_date + timedelta(days=1), progress=False, auto_adjust=True)
+            
+            # Similar handling as in _calculate_portfolio_history for MultiIndex vs Single
+            if "Close" in yf_data:
+                 # Check if MultiIndex
+                 if isinstance(yf_data.columns, pd.MultiIndex):
+                     closes = yf_data['Close']
+                     for sym in yf_symbols:
+                         if sym in closes:
+                            price_history_map[sym] = closes[sym].resample('D').ffill()
+                 else:
+                     # Single symbol
+                     sym = yf_symbols[0]
+                     price_history_map[sym] = yf_data['Close'].resample('D').ffill()
+            elif not yf_data.empty:
+                 # Fallback for simpler structure
+                 for sym in yf_symbols:
+                     if sym in yf_data:
+                         price_history_map[sym] = yf_data[sym].resample('D').ffill()
+        except Exception as e:
+            print(f"Growth Chart YF Error: {e}")
+
+    # TEFAS History (One by one unfortunately, or check bulk capability)
+    tefas_symbols = [s for s in all_symbols if len(s) == 3 and s.isalnum() and "CASH" not in s]
+    for fund in tefas_symbols:
+        try:
+             # Calculate days needed
+             days_diff = (end_date - start_date).days + 5
+             hist = tefas_client.fetch_history(fund, days=days_diff)
+             if hist:
+                 df = pd.DataFrame(hist)
+                 df['date'] = pd.to_datetime(df['date'])
+                 df.set_index('date', inplace=True)
+                 price_history_map[fund] = df['price'].sort_index().resample('D').ffill()
+        except:
+            pass
+
+    # 3. Reconstruct Portfolio Day by Day
+    current_holdings = {} # symbol -> quantity
+    history_points = []
+    
+    # Create date range
+    date_range = pd.date_range(start=start_date, end=end_date)
+    
+    invested_total = 0.0
+    
+    # Group transactions by day for easier processing
+    tx_by_day = {}
+    for tx in transactions:
+        d = tx.created_at.date()
+        if d not in tx_by_day: tx_by_day[d] = []
+        tx_by_day[d].append(tx)
+        
+    for current_day in date_range:
+        day_date = current_day.date()
+        
+        # Process transactions for this day
+        if day_date in tx_by_day:
+            for tx in tx_by_day[day_date]:
+                qty = tx.quantity
+                if tx.type == "SELL":
+                    qty = -qty
+                    # Reduce cost basis?
+                    # For simple "Invested" metric:
+                    # Invested = Net Capital Injected.
+                    # BUY: + (Qty * Price)
+                    # SELL: - (Qty * Price_Sold) -> realizing cash?
+                    # Or SELL: remove pro-rata cost basis?
+                    # If we track "Invested Capital", selling means taking money out.
+                    invested_total -= tx.total_value # Remove the value taken out
+                else:
+                    # BUY
+                    current_holdings[tx.symbol] = current_holdings.get(tx.symbol, 0) + qty
+                    invested_total += tx.total_value
+        
+        # Calculate Value for this day
+        daily_market_value = 0.0
+        
+        # Get USD Rate for this day
+        try:
+            usd_rate = usd_try_hist.asof(current_day)
+            if pd.isna(usd_rate): usd_rate = 1.0 # Fallback
+        except:
+             usd_rate = 1.0
+
+        for sym, qty in current_holdings.items():
+            if qty <= 0: continue
+            
+            # Get Price
+            price = 0.0
+            currency = "TRY"
+            
+            # Check price history
+            if sym in price_history_map:
+                try:
+                    p_series = price_history_map[sym]
+                    # use asof to get latest available price up to this day
+                    idx = p_series.index.get_indexer([current_day], method='pad')[0]
+                    if idx >= 0:
+                        price = p_series.iloc[idx]
+                except:
+                    pass
+            
+            # Handle Currency Conversion if needed
+            # Determine currency (simplified logic from existing)
+            if sym.endswith("-USD") or "=" in sym or "USD" in sym: # Crude check
+                 currency = "USD"
+            
+            val = qty * price
+            if currency == "USD": 
+                val *= usd_rate
+            
+            daily_market_value += val
+            
+        history_points.append({
+            "date": day_date.strftime("%Y-%m-%d"),
+            "value": daily_market_value,
+            "invested": invested_total
+        })
+        
+    # Format transactions for response
+    tx_response = []
+    for tx in transactions:
+        tx_response.append({
+            "date": tx.created_at.strftime("%Y-%m-%d"),
+            "type": tx.type,
+            "symbol": tx.symbol,
+            "quantity": tx.quantity,
+            "price": tx.price,
+            "total_value": tx.total_value
+        })
+        
+    return {
+        "history": history_points,
+        "transactions": tx_response
+    }

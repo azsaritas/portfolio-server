@@ -19,8 +19,8 @@ load_dotenv()
 # Configuration
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-in-production")
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
-ACCESS_TOKEN_EXPIRE_MINUTES = 15
-REFRESH_TOKEN_EXPIRE_DAYS = 7
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 30  # 30 days
+REFRESH_TOKEN_EXPIRE_DAYS = 365  # 1 year
 
 print(f"[DEBUG AUTH] SECRET_KEY loaded: {SECRET_KEY[:10]}... (len: {len(SECRET_KEY)})")
 
