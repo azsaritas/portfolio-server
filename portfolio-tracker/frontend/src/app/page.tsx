@@ -407,6 +407,28 @@ export default function Home() {
 
   const fetchHistory = async () => {
       if (!accessToken) return;
+      
+      // Stale-while-revalidate: Show cached data immediately, then refresh in background
+      const cacheKey = `portfolio_cache_${user?.id || 'default'}`;
+      try {
+          const cached = localStorage.getItem(cacheKey);
+          if (cached) {
+              const { historyData: cachedHistory, statsData: cachedStats, timelineData: cachedTimeline, timestamp } = JSON.parse(cached);
+              // Use cached data immediately (stale-while-revalidate)
+              if (cachedHistory) setHistoryData(cachedHistory);
+              if (cachedStats) setPortfolioStats(cachedStats);
+              if (cachedTimeline) setTimelineData(cachedTimeline);
+              
+              // If cache is less than 2 minutes old, skip network fetch
+              if (Date.now() - timestamp < 120000) {
+                  setTimelineLoading(false);
+                  return;
+              }
+          }
+      } catch {
+          // Cache read failed, continue with network fetch
+      }
+      
       setTimelineLoading(true);
       try {
           // Fetch all data in parallel for faster loading
@@ -422,19 +444,33 @@ export default function Home() {
               })
           ]);
           
+          let newHistoryData = null, newStatsData = null, newTimelineData = null;
+          
           if (historyRes.ok) {
-              const data = await historyRes.json();
-              setHistoryData(data);
+              newHistoryData = await historyRes.json();
+              setHistoryData(newHistoryData);
           }
           
           if (statsRes.ok) {
-              const statsData = await statsRes.json();
-              setPortfolioStats(statsData);
+              newStatsData = await statsRes.json();
+              setPortfolioStats(newStatsData);
           }
           
           if (timelineRes.ok) {
-              const timelineDataRes = await timelineRes.json();
-              setTimelineData(timelineDataRes);
+              newTimelineData = await timelineRes.json();
+              setTimelineData(newTimelineData);
+          }
+          
+          // Save to localStorage cache
+          try {
+              localStorage.setItem(cacheKey, JSON.stringify({
+                  historyData: newHistoryData,
+                  statsData: newStatsData,
+                  timelineData: newTimelineData,
+                  timestamp: Date.now()
+              }));
+          } catch {
+              // localStorage write failed (quota exceeded), ignore
           }
       } catch (e) {
           console.error("Failed to fetch history/stats/timeline");

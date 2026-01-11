@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from fastapi import HTTPException
 from datetime import datetime
 from tefas import tefas_client
+from cache import cache, CacheTTL, get_cached_or_fetch, make_user_cache_key, invalidate_user_cache
 
 def get_asset(db: Session, symbol: str):
     return db.query(models.Asset).filter(models.Asset.symbol == symbol).first()
@@ -90,15 +91,27 @@ def create_asset(db: Session, asset: schemas.AssetCreate):
     return db_asset
 
 def get_usd_try_rate():
+    """Get USD/TRY exchange rate with 5-minute caching."""
+    cache_key = "global:usd_try_rate"
+    
+    # Check cache first
+    cached_rate = cache.get(cache_key)
+    if cached_rate is not None:
+        return cached_rate
+    
+    # Fetch from yfinance
     try:
         ticker = yf.Ticker("USDTRY=X")
-        # fast_info is good, or history
         price = ticker.fast_info.last_price
         if not price:
-             hist = ticker.history(period="1d")
-             if not hist.empty:
-                 price = hist['Close'].iloc[-1]
-        return price if price else 1.0 # Fallback
+            hist = ticker.history(period="1d")
+            if not hist.empty:
+                price = hist['Close'].iloc[-1]
+        
+        rate = price if price else 1.0
+        # Cache for 5 minutes
+        cache.set(cache_key, rate, CacheTTL.USD_RATE)
+        return rate
     except:
         return 1.0
 
@@ -299,6 +312,9 @@ def create_holding(db: Session, holding: schemas.HoldingCreate, user_id: int):
     db.commit()
     db.refresh(db_holding)
     
+    # Invalidate user's portfolio cache
+    invalidate_user_cache(user_id)
+    
     # Return formatted response
     return {
         "id": db_holding.id,
@@ -344,6 +360,10 @@ def delete_holding(db: Session, holding_id: int, user_id: int):
     
     db.delete(holding)
     db.commit()
+    
+    # Invalidate user's portfolio cache
+    invalidate_user_cache(user_id)
+    
     return {"ok": True}
 
 def reduce_holding(db: Session, holding_id: int, quantity: float, user_id: int):
@@ -385,12 +405,16 @@ def reduce_holding(db: Session, holding_id: int, quantity: float, user_id: int):
         # Delete the holding completely
         db.delete(holding)
         db.commit()
+        invalidate_user_cache(user_id)
         return {"ok": True, "deleted": True}
     
     # Reduce the quantity (average cost stays the same)
     holding.quantity = holding.quantity - quantity
     db.commit()
     db.refresh(holding)
+    
+    # Invalidate user's portfolio cache
+    invalidate_user_cache(user_id)
     
     return {"ok": True, "remaining_quantity": holding.quantity}
 
@@ -411,35 +435,50 @@ def update_holding_cost(db: Session, holding_id: int, average_cost: float, user_
     return {"ok": True, "new_average_cost": holding.average_cost}
 
 def get_price(symbol: str):
+    """Get price for a symbol with 1-minute caching."""
     symbol_upper = symbol.upper().strip()
+    cache_key = f"price:{symbol_upper}"
+    
+    # Check cache first
+    cached_price = cache.get(cache_key)
+    if cached_price is not None:
+        return cached_price
+    
+    result = None
     
     # 1. Try TEFAS (if plausible candidate)
     if len(symbol_upper) == 3 and symbol_upper.isalnum():
         try:
             fund_price = tefas_client.get_latest_price(symbol_upper)
             if fund_price:
-                return {"symbol": symbol_upper, "price": fund_price, "currency": "TRY"}
+                result = {"symbol": symbol_upper, "price": fund_price, "currency": "TRY"}
         except:
             pass
-            
-    # 2. Fallback to YFinance
-    if "-" not in symbol_upper and "." not in symbol_upper and "=" not in symbol_upper:
-        symbol_upper += ".IS"
     
-    ticker = yf.Ticker(symbol_upper)
-    try:
-        # Get fast info first
-        price = ticker.fast_info.last_price
-        if not price:
-             # Fallback to history
-             hist = ticker.history(period="1d")
-             if hist.empty:
-                raise HTTPException(status_code=404, detail=f"Quote not found for symbol: {symbol_upper} (and failed TEFAS check)")
-             price = hist['Close'].iloc[-1]
+    # 2. Fallback to YFinance
+    if result is None:
+        yf_symbol = symbol_upper
+        if "-" not in yf_symbol and "." not in yf_symbol and "=" not in yf_symbol:
+            yf_symbol += ".IS"
         
-        return {"symbol": symbol_upper, "price": price, "currency": "TRY"}
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        ticker = yf.Ticker(yf_symbol)
+        try:
+            price = ticker.fast_info.last_price
+            if not price:
+                hist = ticker.history(period="1d")
+                if hist.empty:
+                    raise HTTPException(status_code=404, detail=f"Quote not found for symbol: {yf_symbol}")
+                price = hist['Close'].iloc[-1]
+            
+            result = {"symbol": yf_symbol, "price": price, "currency": "TRY"}
+        except Exception as e:
+            raise HTTPException(status_code=404, detail=str(e))
+    
+    # Cache the result for 1 minute
+    if result:
+        cache.set(cache_key, result, CacheTTL.ASSET_PRICE)
+    
+    return result
 
 def _calculate_portfolio_history(db: Session, user_id: int, period: str = "1mo"):
     holdings = get_holdings(db, user_id)
@@ -633,9 +672,25 @@ def _calculate_portfolio_history(db: Session, user_id: int, period: str = "1mo")
     return history
 
 def get_portfolio_history(db: Session, user_id: int):
-    return _calculate_portfolio_history(db, user_id, period="1y")
+    """Get portfolio history with 2-minute caching."""
+    cache_key = make_user_cache_key(user_id, "portfolio_history")
+    
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
+    result = _calculate_portfolio_history(db, user_id, period="1y")
+    cache.set(cache_key, result, CacheTTL.PORTFOLIO_HISTORY)
+    return result
 
 def get_portfolio_stats(db: Session, user_id: int):
+    """Get portfolio stats with 2-minute caching."""
+    cache_key = make_user_cache_key(user_id, "portfolio_stats")
+    
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
     # Fetch 2 years of history to ensure enough data for yearly comparison + history
     history = _calculate_portfolio_history(db, user_id, period="2y")
     if not history:
@@ -713,12 +768,16 @@ def get_portfolio_stats(db: Session, user_id: int):
             "history": stats_history
         }
 
-    return {
+    result = {
         "daily": calculate_period_stats(1),
         "weekly": calculate_period_stats(7),
         "monthly": calculate_period_stats(30),
         "yearly": calculate_period_stats(365)
     }
+    
+    # Cache the result
+    cache.set(cache_key, result, CacheTTL.PORTFOLIO_STATS)
+    return result
 
 def update_all_assets(db: Session, user_id: int = None):
     # user_id is optional here - we update all assets (shared table)
