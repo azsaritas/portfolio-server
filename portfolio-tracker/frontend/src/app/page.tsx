@@ -80,7 +80,19 @@ export default function Home() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isAuthenticated, guestHoldings]);
 
-  const [holdings, setHoldings] = useState<Holding[]>([]);
+  const [holdings, setHoldings] = useState<Holding[]>(() => {
+    // Initialize with cached data immediately on first render
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('holdings_cache_default');
+        if (cached) {
+          const { data } = JSON.parse(cached);
+          if (data && data.length > 0) return data;
+        }
+      } catch {}
+    }
+    return [];
+  });
   
   // Modal State
   const { isAddModalOpen, closeAddModal } = useUI();
@@ -145,7 +157,18 @@ export default function Home() {
     }
   }, [symbol, activeCategory]);
   
-  const [historyData, setHistoryData] = useState([]);
+  const [historyData, setHistoryData] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('portfolio_cache_default');
+        if (cached) {
+          const { historyData } = JSON.parse(cached);
+          if (historyData) return historyData;
+        }
+      } catch {}
+    }
+    return [];
+  });
   
   // Colors for Pie Chart
   const COLORS = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#6366f1'];
@@ -372,6 +395,29 @@ export default function Home() {
       return;
     }
     
+    const holdingsCacheKey = `holdings_cache_${user?.id || 'default'}`;
+    
+    // Load cached holdings immediately (stale-while-revalidate)
+    try {
+      const cached = localStorage.getItem(holdingsCacheKey);
+      if (cached) {
+        const { data: cachedHoldings, timestamp } = JSON.parse(cached);
+        if (cachedHoldings && cachedHoldings.length > 0) {
+          setHoldings(cachedHoldings);
+          setLoading(false);
+          
+          // If cache is less than 30 seconds old, skip network fetch
+          if (Date.now() - timestamp < 30000) {
+            // Still fetch history if needed
+            fetchHistory();
+            return;
+          }
+        }
+      }
+    } catch {
+      // Cache read failed, continue with network fetch
+    }
+    
     // For authenticated users, fetch from API
     setLoading(true);
     try {
@@ -382,6 +428,16 @@ export default function Home() {
       const data = await res.json();
       setHoldings(data);
       setError('');
+      
+      // Save to cache
+      try {
+        localStorage.setItem(holdingsCacheKey, JSON.stringify({
+          data,
+          timestamp: Date.now()
+        }));
+      } catch {
+        // localStorage write failed, ignore
+      }
       
       // Fetch History if holdings exist
       if (data.length > 0) {
@@ -394,16 +450,50 @@ export default function Home() {
     }
   };
   
-  const [portfolioStats, setPortfolioStats] = useState<any>(null);
+  const [portfolioStats, setPortfolioStats] = useState<any>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('portfolio_cache_default');
+        if (cached) {
+          const { statsData } = JSON.parse(cached);
+          if (statsData) return statsData;
+        }
+      } catch {}
+    }
+    return null;
+  });
   const [selectedStat, setSelectedStat] = useState<any>(null);
   const [activeTotalModal, setActiveTotalModal] = useState<'VALUE' | 'PL' | null>(null);
   const [activePeriod, setActivePeriod] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('daily');
   const [chartPeriod, setChartPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
   
-  // Timeline chart state
-  const [timelineData, setTimelineData] = useState<any>({ timeline: [], transactions: [] });
+  // Timeline chart state - load from cache immediately
+  const [timelineData, setTimelineData] = useState<any>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('portfolio_cache_default');
+        if (cached) {
+          const { timelineData } = JSON.parse(cached);
+          if (timelineData) return timelineData;
+        }
+      } catch {}
+    }
+    return { timeline: [], transactions: [] };
+  });
   const [selectedTransaction, setSelectedTransaction] = useState<any>(null);
-  const [timelineLoading, setTimelineLoading] = useState(true);
+  const [timelineLoading, setTimelineLoading] = useState(() => {
+    // Don't show loading if we have cached data
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('portfolio_cache_default');
+        if (cached) {
+          const { timelineData } = JSON.parse(cached);
+          if (timelineData && timelineData.timeline && timelineData.timeline.length > 0) return false;
+        }
+      } catch {}
+    }
+    return true;
+  });
 
   const fetchHistory = async () => {
       if (!accessToken) return;
@@ -417,11 +507,13 @@ export default function Home() {
               // Use cached data immediately (stale-while-revalidate)
               if (cachedHistory) setHistoryData(cachedHistory);
               if (cachedStats) setPortfolioStats(cachedStats);
-              if (cachedTimeline) setTimelineData(cachedTimeline);
+              if (cachedTimeline) {
+                  setTimelineData(cachedTimeline);
+                  setTimelineLoading(false); // Show chart immediately
+              }
               
-              // If cache is less than 2 minutes old, skip network fetch
+              // If cache is less than 2 minutes old, skip network fetch completely
               if (Date.now() - timestamp < 120000) {
-                  setTimelineLoading(false);
                   return;
               }
           }
