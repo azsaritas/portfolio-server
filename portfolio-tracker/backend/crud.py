@@ -488,6 +488,24 @@ def _calculate_portfolio_history(db: Session, user_id: int, period: str = "1mo")
     portfolio_map = {h['symbol']: {'quantity': h['quantity'], 'currency': h['currency']} for h in holdings}
     all_symbols = list(portfolio_map.keys())
     
+    # Get first addition date for each symbol from transactions
+    # This ensures assets only affect returns from when they were added
+    transactions = db.query(models.PortfolioTransaction).filter(
+        models.PortfolioTransaction.user_id == user_id,
+        models.PortfolioTransaction.quantity > 0  # Only additions, not removals
+    ).all()
+    
+    symbol_first_dates = {}
+    for t in transactions:
+        if t.symbol not in symbol_first_dates or t.created_at < symbol_first_dates[t.symbol]:
+            symbol_first_dates[t.symbol] = t.created_at
+    
+    # Fallback: For holdings without transaction records, use holding created_at
+    holdings_db = db.query(models.Holding).filter(models.Holding.user_id == user_id).all()
+    for h in holdings_db:
+        if h.symbol not in symbol_first_dates:
+            symbol_first_dates[h.symbol] = h.created_at
+    
     # Identify TEFAS vs YFinance vs Cash
     # TEFAS: 3 chars, alnum, no specific suffix in our logic (but stored usually as XXX)
     # Cash: symbols starting with CASH_ - no external data needed
@@ -636,6 +654,11 @@ def _calculate_portfolio_history(db: Session, user_id: int, period: str = "1mo")
                 price = row[symbol]
                 if pd.isna(price): continue
                 
+                # Skip asset if it wasn't in portfolio on this date
+                symbol_start = symbol_first_dates.get(symbol)
+                if symbol_start and date.date() < symbol_start.date():
+                    continue
+                
                 qty = portfolio_map[symbol]['quantity']
                 currency = portfolio_map[symbol]['currency']
                 
@@ -647,6 +670,11 @@ def _calculate_portfolio_history(db: Session, user_id: int, period: str = "1mo")
             
             # Add cash holdings (they don't have historical data, just use current value)
             for cash_sym in cash_symbols:
+                # Skip cash if it wasn't in portfolio on this date
+                cash_start = symbol_first_dates.get(cash_sym)
+                if cash_start and date.date() < cash_start.date():
+                    continue
+                    
                 cash_info = portfolio_map.get(cash_sym, {})
                 qty = cash_info.get('quantity', 0)
                 cash_currency = cash_sym.replace("CASH_", "")
