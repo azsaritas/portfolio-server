@@ -267,6 +267,27 @@ def create_holding(db: Session, holding: schemas.HoldingCreate, user_id: int):
     if not is_tefas and not is_cash:
         if "-" not in symbol_upper and "." not in symbol_upper and "=" not in symbol_upper:
             symbol_upper += ".IS"
+    
+    # Calculate total cost for cash deduction
+    total_cost = holding.quantity * holding.unit_cost
+    
+    # If use_cash is True, deduct from CASH_TRY
+    if holding.use_cash and not is_cash:
+        cash_holding = db.query(models.Holding).filter(
+            models.Holding.symbol == "CASH_TRY",
+            models.Holding.user_id == user_id
+        ).first()
+        
+        if not cash_holding:
+            raise HTTPException(status_code=400, detail="Nakit bakiyeniz bulunmuyor")
+        
+        if cash_holding.quantity < total_cost:
+            raise HTTPException(status_code=400, detail=f"Yetersiz nakit bakiye. Mevcut: {cash_holding.quantity:.2f} TL, Gerekli: {total_cost:.2f} TL")
+        
+        # Deduct from cash
+        cash_holding.quantity -= total_cost
+        if cash_holding.quantity <= 0:
+            db.delete(cash_holding)
             
     # Check if asset exists
     asset = get_asset(db, symbol_upper)
@@ -343,7 +364,7 @@ def create_holding(db: Session, holding: schemas.HoldingCreate, user_id: int):
         "profit_loss_pct": 0.0 # Just calculate in frontend or reuse logic
     }
 
-def delete_holding(db: Session, holding_id: int, user_id: int):
+def delete_holding(db: Session, holding_id: int, user_id: int, transfer_to_cash: bool = False):
     from datetime import timedelta
     TURKEY_OFFSET = timedelta(hours=3)
     
@@ -353,6 +374,35 @@ def delete_holding(db: Session, holding_id: int, user_id: int):
     ).first()
     if not holding:
         raise HTTPException(status_code=404, detail="Holding not found or access denied")
+    
+    # Calculate the value to transfer to cash
+    if transfer_to_cash and not holding.symbol.startswith("CASH_"):
+        asset = get_asset(db, holding.symbol)
+        if asset and asset.last_price:
+            sale_value = holding.quantity * asset.last_price
+        else:
+            sale_value = holding.quantity * holding.average_cost  # Fallback to cost
+        
+        # Add to CASH_TRY
+        cash_holding = db.query(models.Holding).filter(
+            models.Holding.symbol == "CASH_TRY",
+            models.Holding.user_id == user_id
+        ).first()
+        
+        if cash_holding:
+            cash_holding.quantity += sale_value
+        else:
+            # Create CASH_TRY holding
+            cash_asset = get_asset(db, "CASH_TRY")
+            if not cash_asset:
+                cash_asset = create_asset(db, schemas.AssetCreate(symbol="CASH_TRY"))
+            cash_holding = models.Holding(
+                user_id=user_id,
+                symbol="CASH_TRY",
+                quantity=sale_value,
+                average_cost=1.0
+            )
+            db.add(cash_holding)
     
     # Record removal transaction for timeline
     try:
@@ -382,7 +432,7 @@ def delete_holding(db: Session, holding_id: int, user_id: int):
     
     return {"ok": True}
 
-def reduce_holding(db: Session, holding_id: int, quantity: float, user_id: int):
+def reduce_holding(db: Session, holding_id: int, quantity: float, user_id: int, transfer_to_cash: bool = False):
     """Reduce the quantity of a holding by a specified amount."""
     from datetime import timedelta
     TURKEY_OFFSET = timedelta(hours=3)
@@ -396,6 +446,35 @@ def reduce_holding(db: Session, holding_id: int, quantity: float, user_id: int):
     
     if quantity > holding.quantity:
         raise HTTPException(status_code=400, detail="Cannot reduce more than current quantity")
+    
+    # Calculate the value to transfer to cash
+    if transfer_to_cash and not holding.symbol.startswith("CASH_"):
+        asset = get_asset(db, holding.symbol)
+        if asset and asset.last_price:
+            sale_value = quantity * asset.last_price
+        else:
+            sale_value = quantity * holding.average_cost  # Fallback to cost
+        
+        # Add to CASH_TRY
+        cash_holding = db.query(models.Holding).filter(
+            models.Holding.symbol == "CASH_TRY",
+            models.Holding.user_id == user_id
+        ).first()
+        
+        if cash_holding:
+            cash_holding.quantity += sale_value
+        else:
+            # Create CASH_TRY holding
+            cash_asset = get_asset(db, "CASH_TRY")
+            if not cash_asset:
+                cash_asset = create_asset(db, schemas.AssetCreate(symbol="CASH_TRY"))
+            cash_holding = models.Holding(
+                user_id=user_id,
+                symbol="CASH_TRY",
+                quantity=sale_value,
+                average_cost=1.0
+            )
+            db.add(cash_holding)
     
     # Record reduction transaction for timeline
     try:

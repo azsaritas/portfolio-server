@@ -114,9 +114,16 @@ export default function Home() {
   const [topMoversMetric, setTopMoversMetric] = useState<'amount' | 'percent'>('amount');
   const [reduceHolding, setReduceHolding] = useState<Holding | null>(null);
   const [reduceQuantity, setReduceQuantity] = useState('');
+  const [transferToCashReduce, setTransferToCashReduce] = useState(false); // Toggle for transfer to cash on reduce
+
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editHolding, setEditHolding] = useState<Holding | null>(null);
   const [editCost, setEditCost] = useState('');
+
+  // Delete Modal State
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [holdingToDelete, setHoldingToDelete] = useState<Holding | null>(null);
+  const [transferToCashDelete, setTransferToCashDelete] = useState(false);
   const [openActionMenu, setOpenActionMenu] = useState<number | null>(null);
 
   // Form State
@@ -124,6 +131,7 @@ export default function Home() {
   const [quantity, setQuantity] = useState('');
   const [amount, setAmount] = useState(''); // New: for Total Amt mode
   const [cost, setCost] = useState('');
+  const [useCash, setUseCash] = useState(false); // Toggle for using cash when buying
   const [inputMode, setInputMode] = useState<'quantity' | 'amount'>('quantity');
   const [currentPrice, setCurrentPrice] = useState(0);
   
@@ -768,7 +776,8 @@ export default function Home() {
         body: JSON.stringify({ 
             symbol,
             quantity: payloadQuantity,
-            unit_cost: payloadUnitCost
+            unit_cost: payloadUnitCost,
+            use_cash: useCash
         }),
       });
 
@@ -783,6 +792,7 @@ export default function Home() {
       setAmount('');
       setCost('');
       setCurrentPrice(0);
+      setUseCash(false);
       handleCloseModal(); // Close Modal
       fetchHoldings();
     } catch (err: any) {
@@ -827,25 +837,7 @@ export default function Home() {
     localStorage.setItem('guest_holdings', JSON.stringify(updated));
   };
 
-  const handleDelete = async (id: number) => {
-    if (!confirm("Are you sure you want to delete this holding?")) return;
 
-    if (!isAuthenticated) {
-      removeGuestHolding(id);
-      return;
-    }
-
-    try {
-        const res = await fetch(`${API_BASE_URL}/holdings/${id}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${accessToken}` }
-        });
-        if (!res.ok) throw new Error('Failed to delete');
-        fetchHoldings();
-    } catch (err) {
-        alert("Error deleting holding");
-    }
-  };
 
   // Quick add: Open modal with symbol pre-filled
   const handleQuickAdd = (holding: Holding) => {
@@ -870,6 +862,7 @@ export default function Home() {
   const handleOpenReduceModal = (holding: Holding) => {
     setReduceHolding(holding);
     setReduceQuantity('');
+    setTransferToCashReduce(false);
     setIsReduceModalOpen(true);
   };
 
@@ -887,7 +880,7 @@ export default function Home() {
     if (!isAuthenticated) {
       const newQuantity = reduceHolding.quantity - qty;
       const newCurrentValue = newQuantity * reduceHolding.current_price;
-      const newTotalCost = newQuantity * reduceHolding.average_cost;
+      // const newTotalCost = newQuantity * reduceHolding.average_cost; // Not used currently
       
       if (newQuantity <= 0) {
         removeGuestHolding(reduceHolding.id);
@@ -912,7 +905,10 @@ export default function Home() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${accessToken}`
         },
-        body: JSON.stringify({ quantity: qty })
+        body: JSON.stringify({ 
+            quantity: qty,
+            transfer_to_cash: transferToCashReduce
+        })
       });
       
       if (!res.ok) {
@@ -923,9 +919,41 @@ export default function Home() {
       setIsReduceModalOpen(false);
       setReduceHolding(null);
       setReduceQuantity('');
+      setTransferToCashReduce(false);
       await fetchHoldings();
     } catch (err: any) {
       alert(err.message);
+    }
+  };
+
+  const handleDelete = (holding: Holding) => {
+      setHoldingToDelete(holding);
+      setTransferToCashDelete(false);
+      setIsDeleteModalOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!holdingToDelete) return;
+
+    if (!isAuthenticated) {
+      removeGuestHolding(holdingToDelete.id);
+      setIsDeleteModalOpen(false);
+      setHoldingToDelete(null);
+      return;
+    }
+
+    try {
+        const res = await fetch(`${API_BASE_URL}/holdings/${holdingToDelete.id}?transfer_to_cash=${transferToCashDelete}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+        if (!res.ok) throw new Error('Failed to delete');
+        
+        setIsDeleteModalOpen(false);
+        setHoldingToDelete(null);
+        fetchHoldings();
+    } catch (err) {
+        alert("Error deleting holding");
     }
   };
 
@@ -2236,6 +2264,20 @@ export default function Home() {
                                 )}
                             </div>
 
+                            {/* Cash Usage Toggle */}
+                            <div className="flex items-center justify-between p-4 bg-gray-950 rounded-xl border border-gray-800">
+                                <div className="flex items-center">
+                                    <span className="text-sm font-medium text-gray-300">💵 Nakit Kullan</span>
+                                    <span className="ml-2 text-xs text-gray-500">(CASH_TRY&apos;den düş)</span>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setUseCash(!useCash)}
+                                    className={`relative w-14 h-7 rounded-full transition-all ${useCash ? 'bg-green-600' : 'bg-gray-700'}`}
+                                >
+                                    <span className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-all ${useCash ? 'left-8' : 'left-1'}`} />
+                                </button>
+                            </div>
 
                             {error && (
                                 <div className="p-4 bg-red-950/30 border border-red-900/50 rounded-xl text-red-400 text-sm flex items-center">
@@ -2252,7 +2294,7 @@ export default function Home() {
                                 {adding ? (
                                     <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                                 ) : (
-                                    'Invest'
+                                    useCash ? 'Nakitle Al' : 'Invest'
                                 )}
                             </button>
                               </>
@@ -2446,7 +2488,7 @@ export default function Home() {
                                             </button>
                                             <div className="border-t border-gray-700 my-1"></div>
                                             <button 
-                                                onClick={() => { handleDelete(h.id); setOpenActionMenu(null); }}
+                                                onClick={() => { handleDelete(h); setOpenActionMenu(null); }}
                                                 className="w-full px-4 py-2.5 text-left text-sm text-gray-300 hover:bg-red-900/30 hover:text-red-400 flex items-center space-x-3 transition-colors"
                                             >
                                                 <Trash2 className="w-4 h-4" />
@@ -2535,7 +2577,7 @@ export default function Home() {
                                                         <button onClick={() => { handleOpenEditModal(h); setOpenActionMenu(null); }} className="w-full px-4 py-3 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center space-x-3 border-b border-gray-700/50 active:bg-gray-600">
                                                             <Pencil className="w-4 h-4 text-blue-400" /> <span>Düzenle</span>
                                                         </button>
-                                                        <button onClick={() => { handleDelete(h.id); setOpenActionMenu(null); }} className="w-full px-4 py-3 text-left text-sm text-red-300 hover:bg-red-900/20 flex items-center space-x-3 active:bg-red-900/30">
+                                                        <button onClick={() => { handleDelete(h); setOpenActionMenu(null); }} className="w-full px-4 py-3 text-left text-sm text-red-300 hover:bg-red-900/20 flex items-center space-x-3 active:bg-red-900/30">
                                                             <Trash2 className="w-4 h-4 text-red-400" /> <span>Sil</span>
                                                         </button>
                                                     </div>
@@ -2658,15 +2700,79 @@ export default function Home() {
                 )}
               </div>
 
+              {/* Cash Transfer Toggle for Reduce */}
+              {reduceHolding.symbol !== 'CASH_TRY' && (
+                <div className="flex items-center justify-between p-3 bg-gray-950 rounded-xl border border-gray-800">
+                    <div className="flex items-center">
+                        <span className="text-sm font-medium text-gray-300">💰 Nakite Ekle</span>
+                        <span className="ml-2 text-[10px] text-gray-500">(CASH_TRY)</span>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setTransferToCashReduce(!transferToCashReduce)}
+                        className={`relative w-12 h-6 rounded-full transition-all ${transferToCashReduce ? 'bg-green-600' : 'bg-gray-700'}`}
+                    >
+                        <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${transferToCashReduce ? 'left-7' : 'left-1'}`} />
+                    </button>
+                </div>
+              )}
+
               <button
                 type="submit"
                 disabled={!reduceQuantity || parseFloat(reduceQuantity) <= 0 || parseFloat(reduceQuantity) > reduceHolding.quantity}
                 className="w-full py-3 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 disabled:hover:bg-yellow-600 rounded-xl font-bold text-white transition-all"
               >
-                Azalt
+                {transferToCashReduce ? 'Azalt ve Nakite Ekle' : 'Azalt'}
               </button>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {isDeleteModalOpen && holdingToDelete && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-gray-900 w-full max-w-sm rounded-2xl border border-gray-800 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+                <div className="p-5 text-center">
+                    <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Trash2 className="w-8 h-8 text-red-500" />
+                    </div>
+                    <h2 className="text-xl font-bold text-white mb-2">Varlığı Sil</h2>
+                    <p className="text-gray-400 text-sm mb-6">
+                        <span className="font-bold text-white">{holdingToDelete.symbol}</span> varlığını portföyünüzden silmek üzeresiniz. Bu işlem geri alınamaz.
+                    </p>
+                    
+                    {holdingToDelete.symbol !== 'CASH_TRY' && (
+                        <div className="flex items-center justify-between p-3 bg-gray-800/50 rounded-xl border border-gray-700/50 mb-6 text-left">
+                            <div className="flex items-center">
+                                <span className="text-sm font-medium text-gray-300">💰 Satış Tutarını Nakite Ekle</span>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setTransferToCashDelete(!transferToCashDelete)}
+                                className={`relative w-12 h-6 rounded-full transition-all ${transferToCashDelete ? 'bg-green-600' : 'bg-gray-700'}`}
+                            >
+                                <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${transferToCashDelete ? 'left-7' : 'left-1'}`} />
+                            </button>
+                        </div>
+                    )}
+
+                    <div className="flex space-x-3">
+                        <button 
+                            onClick={() => { setIsDeleteModalOpen(false); setHoldingToDelete(null); }}
+                            className="flex-1 py-3 bg-gray-800 hover:bg-gray-700 rounded-xl font-bold text-gray-300 transition-colors"
+                        >
+                            İptal
+                        </button>
+                        <button 
+                            onClick={handleDeleteConfirm}
+                            className="flex-1 py-3 bg-red-600 hover:bg-red-500 rounded-xl font-bold text-white transition-colors"
+                        >
+                            {transferToCashDelete ? 'Sil ve Ekle' : 'Sil'}
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
       )}
 

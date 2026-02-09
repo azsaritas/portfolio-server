@@ -24,6 +24,7 @@ class HoldingBase(BaseModel):
 class HoldingCreate(HoldingBase):
     quantity: float
     unit_cost: float
+    use_cash: bool = False  # If True, deduct from CASH_TRY
 
 class HoldingResponse(HoldingBase):
     id: int

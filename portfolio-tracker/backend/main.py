@@ -105,10 +105,11 @@ def read_holdings(
 @app.delete("/holdings/{holding_id}")
 def delete_holding(
     holding_id: int, 
+    transfer_to_cash: bool = False,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    return crud.delete_holding(db=db, holding_id=holding_id, user_id=current_user.id)
+    return crud.delete_holding(db=db, holding_id=holding_id, user_id=current_user.id, transfer_to_cash=transfer_to_cash)
 
 @app.post("/holdings/{holding_id}/reduce")
 def reduce_holding(
@@ -119,9 +120,10 @@ def reduce_holding(
 ):
     """Reduce the quantity of a holding by a specified amount."""
     quantity = data.get("quantity", 0)
+    transfer_to_cash = data.get("transfer_to_cash", False)
     if quantity <= 0:
         raise HTTPException(status_code=400, detail="Quantity must be positive")
-    return crud.reduce_holding(db=db, holding_id=holding_id, quantity=quantity, user_id=current_user.id)
+    return crud.reduce_holding(db=db, holding_id=holding_id, quantity=quantity, user_id=current_user.id, transfer_to_cash=transfer_to_cash)
 
 @app.post("/holdings/{holding_id}/update-cost")
 def update_holding_cost(
