@@ -37,6 +37,7 @@ interface Holding {
   total_value_try: number;
   profit_loss_try: number;
   daily_change_pct: number;
+  daily_change_value_try: number;
   currency: string;
 }
 
@@ -523,12 +524,18 @@ export default function Home() {
       
       setTimelineLoading(true);
       try {
+          // First, create today's snapshot to record current values
+          await fetch(`${API_BASE_URL}/portfolio/snapshot`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          }).catch(() => {}); // Ignore errors, snapshot creation is optional
+          
           // Fetch all data in parallel for faster loading
           const [historyRes, statsRes, timelineRes] = await Promise.all([
               fetch(`${API_BASE_URL}/portfolio/history`, {
                 headers: { 'Authorization': `Bearer ${accessToken}` }
               }),
-              fetch(`${API_BASE_URL}/portfolio/stats`, {
+              fetch(`${API_BASE_URL}/portfolio/stats/snapshots`, {
                 headers: { 'Authorization': `Bearer ${accessToken}` }
               }),
               fetch(`${API_BASE_URL}/portfolio/timeline`, {
@@ -2382,6 +2389,7 @@ export default function Home() {
                                 </div>
                                 <div className={`text-xs font-semibold ${(h.daily_change_pct || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                     {(h.daily_change_pct || 0) >= 0 ? '+' : ''}{(h.daily_change_pct || 0).toFixed(2)}%
+                                    <span className="ml-1 opacity-80">({(h.daily_change_value_try || 0) >= 0 ? '+' : ''}{(h.daily_change_value_try || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}₺)</span>
                                 </div>
                             </td>
                             <td className="px-6 py-5 text-right font-mono font-bold text-white">
@@ -2556,6 +2564,7 @@ export default function Home() {
                                                  </div>
                                                  <div className={`text-xs font-bold ${h.daily_change_pct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                                     {(h.daily_change_pct || 0) >= 0 ? '+' : ''}{(h.daily_change_pct || 0).toFixed(2)}%
+                                                    <span className="ml-1 opacity-80">({(h.daily_change_value_try || 0) >= 0 ? '+' : ''}{(h.daily_change_value_try || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}₺)</span>
                                                  </div>
                                              </div>
                                              <div className="text-right">

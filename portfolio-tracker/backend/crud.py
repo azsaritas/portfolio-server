@@ -212,6 +212,21 @@ def get_holdings(db: Session, user_id: int):
                 total_value_try = total_value
                 profit_loss_try = profit_loss
 
+        # Calculate daily change value in TRY
+        # Formula: quantity * (current_price - previous_price)
+        # previous_price = current_price / (1 + daily_change_pct/100)
+        if daily_change_pct != 0:
+            previous_price = current_price / (1 + daily_change_pct / 100)
+            price_diff = current_price - previous_price
+            daily_change_value = h.quantity * price_diff
+            # Convert to TRY if needed
+            if currency == "USD":
+                daily_change_value_try = daily_change_value * usd_try_rate
+            else:
+                daily_change_value_try = daily_change_value
+        else:
+            daily_change_value_try = 0.0
+
         results.append({
             "id": h.id,
             "symbol": h.symbol,
@@ -225,7 +240,8 @@ def get_holdings(db: Session, user_id: int):
             "currency": currency,
             "total_value_try": total_value_try,
             "profit_loss_try": profit_loss_try,
-            "daily_change_pct": daily_change_pct
+            "daily_change_pct": daily_change_pct,
+            "daily_change_value_try": daily_change_value_try
         })
     return results
 
@@ -488,24 +504,6 @@ def _calculate_portfolio_history(db: Session, user_id: int, period: str = "1mo")
     portfolio_map = {h['symbol']: {'quantity': h['quantity'], 'currency': h['currency']} for h in holdings}
     all_symbols = list(portfolio_map.keys())
     
-    # Get first addition date for each symbol from transactions
-    # This ensures assets only affect returns from when they were added
-    transactions = db.query(models.PortfolioTransaction).filter(
-        models.PortfolioTransaction.user_id == user_id,
-        models.PortfolioTransaction.quantity > 0  # Only additions, not removals
-    ).all()
-    
-    symbol_first_dates = {}
-    for t in transactions:
-        if t.symbol not in symbol_first_dates or t.created_at < symbol_first_dates[t.symbol]:
-            symbol_first_dates[t.symbol] = t.created_at
-    
-    # Fallback: For holdings without transaction records, use holding created_at
-    holdings_db = db.query(models.Holding).filter(models.Holding.user_id == user_id).all()
-    for h in holdings_db:
-        if h.symbol not in symbol_first_dates:
-            symbol_first_dates[h.symbol] = h.created_at
-    
     # Identify TEFAS vs YFinance vs Cash
     # TEFAS: 3 chars, alnum, no specific suffix in our logic (but stored usually as XXX)
     # Cash: symbols starting with CASH_ - no external data needed
@@ -654,11 +652,6 @@ def _calculate_portfolio_history(db: Session, user_id: int, period: str = "1mo")
                 price = row[symbol]
                 if pd.isna(price): continue
                 
-                # Skip asset if it wasn't in portfolio on this date
-                symbol_start = symbol_first_dates.get(symbol)
-                if symbol_start and date.date() < symbol_start.date():
-                    continue
-                
                 qty = portfolio_map[symbol]['quantity']
                 currency = portfolio_map[symbol]['currency']
                 
@@ -670,11 +663,6 @@ def _calculate_portfolio_history(db: Session, user_id: int, period: str = "1mo")
             
             # Add cash holdings (they don't have historical data, just use current value)
             for cash_sym in cash_symbols:
-                # Skip cash if it wasn't in portfolio on this date
-                cash_start = symbol_first_dates.get(cash_sym)
-                if cash_start and date.date() < cash_start.date():
-                    continue
-                    
                 cash_info = portfolio_map.get(cash_sym, {})
                 qty = cash_info.get('quantity', 0)
                 cash_currency = cash_sym.replace("CASH_", "")
@@ -806,6 +794,155 @@ def get_portfolio_stats(db: Session, user_id: int):
     # Cache the result
     cache.set(cache_key, result, CacheTTL.PORTFOLIO_STATS)
     return result
+
+# ============ Daily Snapshot Functions ============
+
+def create_daily_snapshot(db: Session, user_id: int):
+    """
+    Create or update a daily snapshot for the user.
+    Calculates total portfolio value and sums all holdings' daily_change_value_try.
+    """
+    from datetime import date
+    today = date.today()
+    
+    # Get all holdings with calculated values
+    holdings = get_holdings(db, user_id)
+    
+    if not holdings:
+        return None
+    
+    # Calculate totals from holdings
+    total_value_try = sum(h.get('total_value_try', 0) for h in holdings)
+    daily_change_value = sum(h.get('daily_change_value_try', 0) for h in holdings)
+    
+    # Calculate percentage based on previous value
+    previous_value = total_value_try - daily_change_value
+    daily_change_pct = (daily_change_value / previous_value * 100) if previous_value > 0 else 0
+    
+    # Check if snapshot already exists for today
+    existing = db.query(models.DailySnapshot).filter(
+        models.DailySnapshot.user_id == user_id,
+        models.DailySnapshot.date == today
+    ).first()
+    
+    if existing:
+        # Update existing snapshot
+        existing.total_value_try = total_value_try
+        existing.daily_change_value = daily_change_value
+        existing.daily_change_pct = daily_change_pct
+    else:
+        # Create new snapshot
+        snapshot = models.DailySnapshot(
+            user_id=user_id,
+            date=today,
+            total_value_try=total_value_try,
+            daily_change_value=daily_change_value,
+            daily_change_pct=daily_change_pct
+        )
+        db.add(snapshot)
+    
+    db.commit()
+    
+    return {
+        "date": today.isoformat(),
+        "total_value_try": total_value_try,
+        "daily_change_value": daily_change_value,
+        "daily_change_pct": daily_change_pct
+    }
+
+def get_daily_snapshots(db: Session, user_id: int, limit: int = 30):
+    """Get the last N daily snapshots for a user."""
+    snapshots = db.query(models.DailySnapshot).filter(
+        models.DailySnapshot.user_id == user_id
+    ).order_by(models.DailySnapshot.date.desc()).limit(limit).all()
+    
+    return [{
+        "date": s.date.isoformat(),
+        "total_value_try": s.total_value_try,
+        "daily_change_value": s.daily_change_value,
+        "daily_change_pct": s.daily_change_pct
+    } for s in reversed(snapshots)]  # Reverse to get chronological order
+
+def get_portfolio_stats_from_snapshots(db: Session, user_id: int):
+    """
+    Get portfolio stats using stored snapshots for historical data.
+    Today's data comes from real-time holdings calculation.
+    """
+    from datetime import date, timedelta
+    
+    today = date.today()
+    
+    # Get real-time data for today
+    holdings = get_holdings(db, user_id)
+    if not holdings:
+        return {}
+    
+    current_total = sum(h.get('total_value_try', 0) for h in holdings)
+    today_change_value = sum(h.get('daily_change_value_try', 0) for h in holdings)
+    today_previous = current_total - today_change_value
+    today_change_pct = (today_change_value / today_previous * 100) if today_previous > 0 else 0
+    
+    # Get historical snapshots
+    snapshots = db.query(models.DailySnapshot).filter(
+        models.DailySnapshot.user_id == user_id
+    ).order_by(models.DailySnapshot.date.desc()).limit(365).all()
+    
+    # Build history list with today's data first
+    daily_history = [{
+        "date": today.isoformat(),
+        "value": today_change_value,
+        "percentage": today_change_pct,
+        "total_value": current_total
+    }]
+    
+    # Add historical snapshots
+    for s in snapshots:
+        if s.date < today:
+            daily_history.append({
+                "date": s.date.isoformat(),
+                "value": s.daily_change_value,
+                "percentage": s.daily_change_pct,
+                "total_value": s.total_value_try
+            })
+    
+    # Calculate period stats
+    def calculate_period_stats(days_per_period, history_count=10):
+        # Filter history for the period
+        period_items = []
+        for i, item in enumerate(daily_history[:history_count * days_per_period]):
+            if i % days_per_period == 0:
+                # Sum values for the period
+                period_value = sum(
+                    h.get('value', 0) for h in daily_history[i:i+days_per_period] if isinstance(h, dict)
+                )
+                period_items.append({
+                    "date": item["date"],
+                    "value": period_value,
+                    "percentage": item["percentage"],
+                    "total_value": item["total_value"]
+                })
+        
+        current = period_items[0] if period_items else {"value": 0, "percentage": 0}
+        previous = period_items[1] if len(period_items) > 1 else {"value": 0, "percentage": 0}
+        
+        return {
+            "current": {"value": current.get("value", 0), "percentage": current.get("percentage", 0)},
+            "previous": {"value": previous.get("value", 0), "percentage": previous.get("percentage", 0)},
+            "history": period_items[:history_count]
+        }
+    
+    return {
+        "daily": {
+            "current": {"value": today_change_value, "percentage": today_change_pct},
+            "previous": {"value": daily_history[1]["value"] if len(daily_history) > 1 else 0, 
+                        "percentage": daily_history[1]["percentage"] if len(daily_history) > 1 else 0},
+            "history": daily_history[:10]
+        },
+        "weekly": calculate_period_stats(7),
+        "monthly": calculate_period_stats(30),
+        "yearly": calculate_period_stats(365)
+    }
+
 
 def update_all_assets(db: Session, user_id: int = None):
     # user_id is optional here - we update all assets (shared table)
@@ -1017,6 +1154,19 @@ def simulate_portfolio(request: schemas.SimulationRequest):
         if currency == "USD":
             total_value_try = total_value * usd_rate
             
+        # Calculate daily change value in TRY
+        # Formula: quantity * (current_price - previous_price)
+        if daily_change_pct != 0:
+            previous_price = current_price / (1 + daily_change_pct / 100)
+            price_diff = current_price - previous_price
+            daily_change_value = qty * price_diff
+            if currency == "USD":
+                daily_change_value_try = daily_change_value * usd_rate
+            else:
+                daily_change_value_try = daily_change_value
+        else:
+            daily_change_value_try = 0.0
+            
         simulated_holdings.append({
             "id": 0,
             "symbol": symbol,
@@ -1028,6 +1178,7 @@ def simulate_portfolio(request: schemas.SimulationRequest):
             "profit_loss": 0,
             "profit_loss_pct": 0,
             "daily_change_pct": daily_change_pct,
+            "daily_change_value_try": daily_change_value_try,
             "currency": currency,
             "total_value_try": total_value_try,
             "profit_loss_try": 0
@@ -1440,3 +1591,113 @@ def reset_portfolio_timeline(db: Session, user_id: int):
     db.commit()
     
     return {"message": "Timeline reset successfully", "transactions_created": count}
+
+# ============ Admin Snapshot Functions ============
+
+def get_all_snapshots_admin(db: Session, skip: int = 0, limit: int = 100, user_id: int = None):
+    """Get all daily snapshots, optionally filtered by user."""
+    query = db.query(models.DailySnapshot, models.User.email).join(
+        models.User, models.DailySnapshot.user_id == models.User.id
+    )
+    
+    if user_id:
+        query = query.filter(models.DailySnapshot.user_id == user_id)
+    
+    snapshots = query.order_by(
+        models.DailySnapshot.date.desc()
+    ).offset(skip).limit(limit).all()
+    
+    return [{
+        "id": s.DailySnapshot.id,
+        "user_id": s.DailySnapshot.user_id,
+        "user_email": s.email,
+        "date": s.DailySnapshot.date.isoformat(),
+        "total_value_try": s.DailySnapshot.total_value_try,
+        "daily_change_value": s.DailySnapshot.daily_change_value,
+        "daily_change_pct": s.DailySnapshot.daily_change_pct,
+        "created_at": s.DailySnapshot.created_at.isoformat() if s.DailySnapshot.created_at else None
+    } for s in snapshots]
+
+def create_snapshot_admin(db: Session, data: dict):
+    """Create or update a snapshot for a user on a specific date."""
+    from datetime import datetime
+    
+    user_id = data.get("user_id")
+    date_str = data.get("date")
+    total_value_try = data.get("total_value_try", 0)
+    daily_change_value = data.get("daily_change_value", 0)
+    daily_change_pct = data.get("daily_change_pct", 0)
+    
+    if not user_id or not date_str:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="user_id and date are required")
+    
+    # Parse date
+    snapshot_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    
+    # Check if exists
+    existing = db.query(models.DailySnapshot).filter(
+        models.DailySnapshot.user_id == user_id,
+        models.DailySnapshot.date == snapshot_date
+    ).first()
+    
+    if existing:
+        existing.total_value_try = total_value_try
+        existing.daily_change_value = daily_change_value
+        existing.daily_change_pct = daily_change_pct
+        db.commit()
+        return {"message": "Snapshot updated", "id": existing.id}
+    else:
+        snapshot = models.DailySnapshot(
+            user_id=user_id,
+            date=snapshot_date,
+            total_value_try=total_value_try,
+            daily_change_value=daily_change_value,
+            daily_change_pct=daily_change_pct
+        )
+        db.add(snapshot)
+        db.commit()
+        return {"message": "Snapshot created", "id": snapshot.id}
+
+def update_snapshot_admin(db: Session, snapshot_id: int, data: dict):
+    """Update a specific snapshot."""
+    from fastapi import HTTPException
+    
+    snapshot = db.query(models.DailySnapshot).filter(
+        models.DailySnapshot.id == snapshot_id
+    ).first()
+    
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    
+    if "total_value_try" in data:
+        snapshot.total_value_try = data["total_value_try"]
+    if "daily_change_value" in data:
+        snapshot.daily_change_value = data["daily_change_value"]
+    if "daily_change_pct" in data:
+        snapshot.daily_change_pct = data["daily_change_pct"]
+    
+    db.commit()
+    return {
+        "id": snapshot.id,
+        "user_id": snapshot.user_id,
+        "date": snapshot.date.isoformat(),
+        "total_value_try": snapshot.total_value_try,
+        "daily_change_value": snapshot.daily_change_value,
+        "daily_change_pct": snapshot.daily_change_pct
+    }
+
+def delete_snapshot_admin(db: Session, snapshot_id: int):
+    """Delete a specific snapshot."""
+    from fastapi import HTTPException
+    
+    snapshot = db.query(models.DailySnapshot).filter(
+        models.DailySnapshot.id == snapshot_id
+    ).first()
+    
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    
+    db.delete(snapshot)
+    db.commit()
+    return {"message": "Snapshot deleted successfully"}

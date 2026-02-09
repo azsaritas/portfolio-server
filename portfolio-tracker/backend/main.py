@@ -2,15 +2,57 @@ from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 import crud, models, schemas
 from database import SessionLocal, engine
 from auth import get_current_user
 from auth_routes import router as auth_router
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+
+# Scheduler for automatic daily snapshots
+scheduler = AsyncIOScheduler()
+
+def create_daily_snapshots_for_all_users():
+    """Create daily snapshots for all users at end of day."""
+    print("🕐 Running scheduled snapshot creation for all users...")
+    db = SessionLocal()
+    try:
+        # Get all users
+        users = db.query(models.User).all()
+        count = 0
+        for user in users:
+            try:
+                crud.create_daily_snapshot(db, user.id)
+                count += 1
+            except Exception as e:
+                print(f"  Error creating snapshot for user {user.id}: {e}")
+        print(f"✅ Created snapshots for {count} users")
+    except Exception as e:
+        print(f"❌ Scheduler error: {e}")
+    finally:
+        db.close()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Schedule daily snapshot at 23:59
+    scheduler.add_job(
+        create_daily_snapshots_for_all_users,
+        CronTrigger(hour=23, minute=59),
+        id="daily_snapshots",
+        replace_existing=True
+    )
+    scheduler.start()
+    print("📅 Scheduler started - Daily snapshots will be created at 23:59")
+    yield
+    # Shutdown
+    scheduler.shutdown()
+    print("📅 Scheduler stopped")
 
 # Create tables
 models.Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Portfolio Tracker MVP")
+app = FastAPI(title="Portfolio Tracker MVP", lifespan=lifespan)
 
 # CORS Setup
 origins = [
@@ -115,6 +157,35 @@ def get_portfolio_stats(
     current_user: models.User = Depends(get_current_user)
 ):
     return crud.get_portfolio_stats(db, user_id=current_user.id)
+
+@app.post("/portfolio/snapshot")
+def create_daily_snapshot(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Create or update today's portfolio snapshot."""
+    result = crud.create_daily_snapshot(db, user_id=current_user.id)
+    if not result:
+        raise HTTPException(status_code=400, detail="No holdings to snapshot")
+    return result
+
+@app.get("/portfolio/snapshots")
+def get_daily_snapshots(
+    limit: int = 30,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Get historical daily snapshots."""
+    return crud.get_daily_snapshots(db, user_id=current_user.id, limit=limit)
+
+@app.get("/portfolio/stats/snapshots")
+def get_portfolio_stats_from_snapshots(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Get portfolio stats using stored snapshots for historical data."""
+    return crud.get_portfolio_stats_from_snapshots(db, user_id=current_user.id)
+
 
 @app.get("/portfolio/timeline")
 def get_portfolio_timeline(
@@ -284,4 +355,45 @@ def admin_get_holdings(
 ):
     """Get all holdings across all users."""
     return crud.get_all_holdings_admin(db, skip=skip, limit=limit, symbol=symbol)
+
+# ============ Admin Snapshot Endpoints ============
+
+@app.get("/admin/snapshots")
+def admin_get_snapshots(
+    skip: int = 0,
+    limit: int = 100,
+    user_id: int = None,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(get_admin_user)
+):
+    """Get all daily snapshots, optionally filtered by user."""
+    return crud.get_all_snapshots_admin(db, skip=skip, limit=limit, user_id=user_id)
+
+@app.post("/admin/snapshots")
+def admin_create_snapshot(
+    data: dict,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(get_admin_user)
+):
+    """Create or update a snapshot for a user on a specific date."""
+    return crud.create_snapshot_admin(db, data)
+
+@app.put("/admin/snapshots/{snapshot_id}")
+def admin_update_snapshot(
+    snapshot_id: int,
+    data: dict,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(get_admin_user)
+):
+    """Update a specific snapshot."""
+    return crud.update_snapshot_admin(db, snapshot_id, data)
+
+@app.delete("/admin/snapshots/{snapshot_id}")
+def admin_delete_snapshot(
+    snapshot_id: int,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(get_admin_user)
+):
+    """Delete a specific snapshot."""
+    return crud.delete_snapshot_admin(db, snapshot_id)
 

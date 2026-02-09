@@ -7,7 +7,7 @@ import {
   Users, Activity, Wallet, TrendingUp, Shield, 
   Search, RefreshCw, Trash2, Edit, ChevronLeft, ChevronRight,
   UserCheck, UserX, Crown, Calendar, Clock, Database,
-  ArrowUpRight, ArrowDownRight, Eye, X, Check
+  ArrowUpRight, ArrowDownRight, Eye, X, Check, Camera, Plus
 } from 'lucide-react';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -54,19 +54,33 @@ interface HoldingAdmin {
   created_at: string | null;
 }
 
+interface SnapshotAdmin {
+  id: number;
+  user_id: number;
+  user_email: string;
+  date: string;
+  total_value_try: number;
+  daily_change_value: number;
+  daily_change_pct: number;
+  created_at: string | null;
+}
+
 export default function AdminPage() {
   const { isAuthenticated, user, accessToken: token, isLoading: authLoading } = useAuth();
   const router = useRouter();
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'activity' | 'holdings'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'activity' | 'holdings' | 'snapshots'>('overview');
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [users, setUsers] = useState<UserAdmin[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
   const [holdings, setHoldings] = useState<HoldingAdmin[]>([]);
+  const [snapshots, setSnapshots] = useState<SnapshotAdmin[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [editingUser, setEditingUser] = useState<UserAdmin | null>(null);
+  const [editingSnapshot, setEditingSnapshot] = useState<SnapshotAdmin | null>(null);
+  const [newSnapshot, setNewSnapshot] = useState<{user_id: string, date: string, total_value_try: string, daily_change_value: string, daily_change_pct: string} | null>(null);
   const [currentPage, setCurrentPage] = useState(0);
   const [isAdmin, setIsAdmin] = useState(false);
 
@@ -152,6 +166,12 @@ export default function AdminPage() {
             headers: { 'Authorization': `Bearer ${token}` }
           });
           if (res.ok) setHoldings(await res.json());
+        } else if (activeTab === 'snapshots') {
+          const userFilter = searchQuery ? `&user_id=${searchQuery}` : '';
+          const res = await fetch(`${API_BASE_URL}/admin/snapshots?skip=${currentPage * 100}&limit=100${userFilter}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (res.ok) setSnapshots(await res.json());
         } else if (activeTab === 'overview') {
           const res = await fetch(`${API_BASE_URL}/admin/stats`, {
             headers: { 'Authorization': `Bearer ${token}` }
@@ -277,6 +297,7 @@ export default function AdminPage() {
             { id: 'users', label: 'Kullanıcılar', icon: Users },
             { id: 'activity', label: 'Aktiviteler', icon: Activity },
             { id: 'holdings', label: 'Portföyler', icon: Wallet },
+            { id: 'snapshots', label: 'Snapshots', icon: Camera },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -551,7 +572,276 @@ export default function AdminPage() {
             </div>
           </div>
         )}
+
+        {/* Snapshots Tab */}
+        {activeTab === 'snapshots' && (
+          <div className="space-y-4">
+            <div className="flex items-center space-x-4">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
+                <input
+                  type="text"
+                  placeholder="User ID ile filtrele..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 bg-gray-900 border border-gray-800 rounded-lg text-white focus:border-purple-500 focus:outline-none"
+                />
+              </div>
+              <button
+                onClick={() => setNewSnapshot({ user_id: '', date: new Date().toISOString().split('T')[0], total_value_try: '', daily_change_value: '', daily_change_pct: '' })}
+                className="flex items-center space-x-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Ekle</span>
+              </button>
+            </div>
+
+            <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-800/50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase">ID</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase">Kullanıcı</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase">Tarih</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-gray-400 uppercase">Toplam Değer</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-gray-400 uppercase">Günlük Değişim</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-gray-400 uppercase">%</th>
+                      <th className="px-4 py-3 text-center text-xs font-semibold text-gray-400 uppercase">İşlem</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-800">
+                    {snapshots.map((s) => (
+                      <tr key={s.id} className="hover:bg-gray-800/50">
+                        <td className="px-4 py-3 text-sm text-gray-400">#{s.id}</td>
+                        <td className="px-4 py-3 text-white">{s.user_email}</td>
+                        <td className="px-4 py-3 text-gray-300">{s.date}</td>
+                        <td className="px-4 py-3 text-right text-white font-medium">
+                          ₺{s.total_value_try.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                        </td>
+                        <td className={`px-4 py-3 text-right font-medium ${s.daily_change_value >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {s.daily_change_value >= 0 ? '+' : ''}₺{s.daily_change_value.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                        </td>
+                        <td className={`px-4 py-3 text-right font-medium ${s.daily_change_pct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {s.daily_change_pct >= 0 ? '+' : ''}{s.daily_change_pct.toFixed(2)}%
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex justify-center space-x-2">
+                            <button 
+                              onClick={() => setEditingSnapshot(s)}
+                              className="p-1.5 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onClick={async () => {
+                                if (!confirm('Bu snapshot\'ı silmek istediğinize emin misiniz?')) return;
+                                try {
+                                  await fetch(`${API_BASE_URL}/admin/snapshots/${s.id}`, {
+                                    method: 'DELETE',
+                                    headers: { 'Authorization': `Bearer ${token}` }
+                                  });
+                                  setSnapshots(snapshots.filter(snap => snap.id !== s.id));
+                                } catch (e) {
+                                  console.error('Delete error:', e);
+                                }
+                              }}
+                              className="p-1.5 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {snapshots.length === 0 && (
+                      <tr>
+                        <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                          Snapshot bulunamadı
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Edit Snapshot Modal */}
+      {editingSnapshot && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" onClick={() => setEditingSnapshot(null)}>
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-bold">Snapshot Düzenle</h3>
+              <button onClick={() => setEditingSnapshot(null)} className="p-1 hover:bg-gray-800 rounded-full">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Toplam Değer (TRY)</label>
+                <input
+                  type="number"
+                  value={editingSnapshot.total_value_try}
+                  onChange={(e) => setEditingSnapshot({...editingSnapshot, total_value_try: parseFloat(e.target.value) || 0})}
+                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Günlük Değişim (TRY)</label>
+                <input
+                  type="number"
+                  value={editingSnapshot.daily_change_value}
+                  onChange={(e) => setEditingSnapshot({...editingSnapshot, daily_change_value: parseFloat(e.target.value) || 0})}
+                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Yüzde (%)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={editingSnapshot.daily_change_pct}
+                  onChange={(e) => setEditingSnapshot({...editingSnapshot, daily_change_pct: parseFloat(e.target.value) || 0})}
+                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+                />
+              </div>
+
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await fetch(`${API_BASE_URL}/admin/snapshots/${editingSnapshot.id}`, {
+                      method: 'PUT',
+                      headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                      },
+                      body: JSON.stringify({
+                        total_value_try: editingSnapshot.total_value_try,
+                        daily_change_value: editingSnapshot.daily_change_value,
+                        daily_change_pct: editingSnapshot.daily_change_pct
+                      })
+                    });
+                    if (res.ok) {
+                      setSnapshots(snapshots.map(s => s.id === editingSnapshot.id ? editingSnapshot : s));
+                      setEditingSnapshot(null);
+                    }
+                  } catch (e) {
+                    console.error('Update error:', e);
+                  }
+                }}
+                className="w-full py-3 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl transition-colors"
+              >
+                Kaydet
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Snapshot Modal */}
+      {newSnapshot && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" onClick={() => setNewSnapshot(null)}>
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-bold">Yeni Snapshot</h3>
+              <button onClick={() => setNewSnapshot(null)} className="p-1 hover:bg-gray-800 rounded-full">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">User ID</label>
+                <input
+                  type="number"
+                  value={newSnapshot.user_id}
+                  onChange={(e) => setNewSnapshot({...newSnapshot, user_id: e.target.value})}
+                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+                  placeholder="1"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Tarih (YYYY-MM-DD)</label>
+                <input
+                  type="date"
+                  value={newSnapshot.date}
+                  onChange={(e) => setNewSnapshot({...newSnapshot, date: e.target.value})}
+                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Toplam Değer (TRY)</label>
+                <input
+                  type="number"
+                  value={newSnapshot.total_value_try}
+                  onChange={(e) => setNewSnapshot({...newSnapshot, total_value_try: e.target.value})}
+                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+                  placeholder="100000"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Günlük Değişim (TRY)</label>
+                <input
+                  type="number"
+                  value={newSnapshot.daily_change_value}
+                  onChange={(e) => setNewSnapshot({...newSnapshot, daily_change_value: e.target.value})}
+                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+                  placeholder="1000"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Yüzde (%)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={newSnapshot.daily_change_pct}
+                  onChange={(e) => setNewSnapshot({...newSnapshot, daily_change_pct: e.target.value})}
+                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+                  placeholder="1.5"
+                />
+              </div>
+
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await fetch(`${API_BASE_URL}/admin/snapshots`, {
+                      method: 'POST',
+                      headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                      },
+                      body: JSON.stringify({
+                        user_id: parseInt(newSnapshot.user_id),
+                        date: newSnapshot.date,
+                        total_value_try: parseFloat(newSnapshot.total_value_try) || 0,
+                        daily_change_value: parseFloat(newSnapshot.daily_change_value) || 0,
+                        daily_change_pct: parseFloat(newSnapshot.daily_change_pct) || 0
+                      })
+                    });
+                    if (res.ok) {
+                      setNewSnapshot(null);
+                      // Refresh snapshots
+                      const refreshRes = await fetch(`${API_BASE_URL}/admin/snapshots?limit=100`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                      });
+                      if (refreshRes.ok) setSnapshots(await refreshRes.json());
+                    }
+                  } catch (e) {
+                    console.error('Create error:', e);
+                  }
+                }}
+                className="w-full py-3 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl transition-colors"
+              >
+                Oluştur
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Edit User Modal */}
       {editingUser && (

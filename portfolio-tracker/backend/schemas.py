@@ -37,6 +37,7 @@ class HoldingResponse(HoldingBase):
     total_value_try: float = 0.0
     profit_loss_try: float = 0.0
     daily_change_pct: float = 0.0
+    daily_change_value_try: float = 0.0
     currency: str = "TRY"
 
     class Config:

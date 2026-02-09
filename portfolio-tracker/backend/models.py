@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, Text, Date, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from database import Base
@@ -20,6 +20,7 @@ class User(Base):
     holdings = relationship("Holding", back_populates="user", cascade="all, delete-orphan")
     activity_logs = relationship("ActivityLog", back_populates="user", cascade="all, delete-orphan")
     transactions = relationship("PortfolioTransaction", back_populates="user", cascade="all, delete-orphan")
+    daily_snapshots = relationship("DailySnapshot", back_populates="user", cascade="all, delete-orphan")
 
 class Asset(Base):
     __tablename__ = "assets"
@@ -69,3 +70,19 @@ class PortfolioTransaction(Base):
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     
     user = relationship("User", back_populates="transactions")
+
+class DailySnapshot(Base):
+    """Stores end-of-day portfolio snapshots for each user."""
+    __tablename__ = "daily_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    date = Column(Date, nullable=False, index=True)
+    total_value_try = Column(Float, default=0.0)
+    daily_change_value = Column(Float, default=0.0)  # Sum of all holdings' daily_change_value_try
+    daily_change_pct = Column(Float, default=0.0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User", back_populates="daily_snapshots")
+    
+    __table_args__ = (UniqueConstraint('user_id', 'date', name='uix_user_date'),)
