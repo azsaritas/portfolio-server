@@ -9,13 +9,18 @@ from auth import get_current_user
 from auth_routes import router as auth_router
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
+import pytz
 
 # Scheduler for automatic daily snapshots
 scheduler = AsyncIOScheduler()
 
+# Turkey timezone for proper scheduling
+TURKEY_TZ = pytz.timezone("Europe/Istanbul")
+
 def create_daily_snapshots_for_all_users():
     """Create daily snapshots for all users at end of day."""
-    print("🕐 Running scheduled snapshot creation for all users...")
+    print("[SNAPSHOT] Running scheduled snapshot creation for all users...")
     db = SessionLocal()
     try:
         # Get all users
@@ -27,27 +32,69 @@ def create_daily_snapshots_for_all_users():
                 count += 1
             except Exception as e:
                 print(f"  Error creating snapshot for user {user.id}: {e}")
-        print(f"✅ Created snapshots for {count} users")
+        print(f"[OK] Created/updated snapshots for {count} users")
     except Exception as e:
-        print(f"❌ Scheduler error: {e}")
+        print(f"[ERROR] Scheduler error: {e}")
+    finally:
+        db.close()
+
+def run_backfill_check():
+    """Safety net: check and backfill any missing snapshots."""
+    print("[BACKFILL] Running backfill check for missing snapshots...")
+    db = SessionLocal()
+    try:
+        count = crud.backfill_missing_snapshots(db)
+        print(f"[OK] Backfill check complete - {count} snapshots created")
+    except Exception as e:
+        print(f"[ERROR] Backfill error: {e}")
     finally:
         db.close()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Schedule daily snapshot at 23:59
+    # Startup: Schedule daily snapshot at 23:59 Turkey time
     scheduler.add_job(
         create_daily_snapshots_for_all_users,
-        CronTrigger(hour=23, minute=59),
+        CronTrigger(hour=23, minute=50, timezone=TURKEY_TZ),
         id="daily_snapshots",
         replace_existing=True
     )
+    
+    # Safety net: Run backfill check every 6 hours
+    scheduler.add_job(
+        run_backfill_check,
+        IntervalTrigger(hours=6, timezone=TURKEY_TZ),
+        id="backfill_check",
+        replace_existing=True
+    )
+    
     scheduler.start()
-    print("📅 Scheduler started - Daily snapshots will be created at 23:59")
+    print("[SCHEDULER] Started - Daily snapshots at 23:59 (Europe/Istanbul), backfill check every 6h")
+    
+    # # TEST MODE: Create snapshot every 1 minute for testing
+    # scheduler.add_job(
+    #     create_daily_snapshots_for_all_users,
+    #     IntervalTrigger(minutes=1, timezone=TURKEY_TZ),
+    #     id="test_snapshot_every_minute",
+    #     replace_existing=True
+    # )
+    # print("[TEST] Snapshot every 1 minute enabled for testing")
+    
+    # Run backfill immediately on startup to catch any missed days
+    print("[STARTUP] Running startup backfill check...")
+    db = SessionLocal()
+    try:
+        count = crud.backfill_missing_snapshots(db)
+        print(f"[OK] Startup backfill complete - {count} snapshots created")
+    except Exception as e:
+        print(f"[ERROR] Startup backfill error: {e}")
+    finally:
+        db.close()
+    
     yield
     # Shutdown
     scheduler.shutdown()
-    print("📅 Scheduler stopped")
+    print("[SCHEDULER] Stopped")
 
 # Create tables
 models.Base.metadata.create_all(bind=engine)

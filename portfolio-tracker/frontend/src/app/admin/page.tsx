@@ -607,7 +607,8 @@ export default function AdminPage() {
                       <th className="px-4 py-3 text-right text-xs font-semibold text-gray-400 uppercase">Toplam Değer</th>
                       <th className="px-4 py-3 text-right text-xs font-semibold text-gray-400 uppercase">Günlük Değişim</th>
                       <th className="px-4 py-3 text-right text-xs font-semibold text-gray-400 uppercase">%</th>
-                      <th className="px-4 py-3 text-center text-xs font-semibold text-gray-400 uppercase">İşlem</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase">Kayit Zamani</th>
+                      <th className="px-4 py-3 text-center text-xs font-semibold text-gray-400 uppercase">Islem</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-800">
@@ -624,6 +625,12 @@ export default function AdminPage() {
                         </td>
                         <td className={`px-4 py-3 text-right font-medium ${s.daily_change_pct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                           {s.daily_change_pct >= 0 ? '+' : ''}{s.daily_change_pct.toFixed(2)}%
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-400">
+                          {s.created_at ? new Date(s.created_at).toLocaleString('tr-TR', { 
+                            day: '2-digit', month: '2-digit', year: 'numeric',
+                            hour: '2-digit', minute: '2-digit', second: '2-digit'
+                          }) : '-'}
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex justify-center space-x-2">
@@ -656,7 +663,7 @@ export default function AdminPage() {
                     ))}
                     {snapshots.length === 0 && (
                       <tr>
-                        <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                        <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
                           Snapshot bulunamadı
                         </td>
                       </tr>

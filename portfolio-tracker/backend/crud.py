@@ -876,13 +876,37 @@ def get_portfolio_stats(db: Session, user_id: int):
 
 # ============ Daily Snapshot Functions ============
 
-def create_daily_snapshot(db: Session, user_id: int):
+def create_daily_snapshot(db: Session, user_id: int, target_date=None):
     """
     Create or update a daily snapshot for the user.
     Calculates total portfolio value and sums all holdings' daily_change_value_try.
+    
+    - target_date: optional date to create the snapshot for. Defaults to today (Turkey time).
+    - Past snapshots (before today) are NEVER overwritten — they are immutable.
+    - Today's snapshot can be updated freely.
     """
-    from datetime import date
-    today = date.today()
+    from datetime import date, datetime, timedelta, timezone
+    
+    # Use Turkey timezone for "today"
+    turkey_tz = timezone(timedelta(hours=3))
+    today = datetime.now(turkey_tz).date()
+    snapshot_date = target_date if target_date else today
+    
+    # PROTECTION: Never overwrite a past snapshot
+    if snapshot_date < today:
+        existing = db.query(models.DailySnapshot).filter(
+            models.DailySnapshot.user_id == user_id,
+            models.DailySnapshot.date == snapshot_date
+        ).first()
+        if existing:
+            print(f"  [SKIP] Snapshot for user {user_id} on {snapshot_date} already exists (immutable)")
+            return {
+                "date": snapshot_date.isoformat(),
+                "total_value_try": existing.total_value_try,
+                "daily_change_value": existing.daily_change_value,
+                "daily_change_pct": existing.daily_change_pct,
+                "status": "existing"
+            }
     
     # Get all holdings with calculated values
     holdings = get_holdings(db, user_id)
@@ -890,30 +914,31 @@ def create_daily_snapshot(db: Session, user_id: int):
     if not holdings:
         return None
     
-    # Calculate totals from holdings
-    total_value_try = sum(h.get('total_value_try', 0) for h in holdings)
-    daily_change_value = sum(h.get('daily_change_value_try', 0) for h in holdings)
+    # Calculate totals from holdings (cast to plain float to avoid numpy serialization issues)
+    total_value_try = float(sum(h.get('total_value_try', 0) for h in holdings))
+    daily_change_value = float(sum(h.get('daily_change_value_try', 0) for h in holdings))
     
     # Calculate percentage based on previous value
     previous_value = total_value_try - daily_change_value
-    daily_change_pct = (daily_change_value / previous_value * 100) if previous_value > 0 else 0
+    daily_change_pct = float((daily_change_value / previous_value * 100) if previous_value > 0 else 0)
     
-    # Check if snapshot already exists for today
+    # Check if snapshot already exists for the target date
     existing = db.query(models.DailySnapshot).filter(
         models.DailySnapshot.user_id == user_id,
-        models.DailySnapshot.date == today
+        models.DailySnapshot.date == snapshot_date
     ).first()
     
     if existing:
-        # Update existing snapshot
+        # Update existing snapshot (only reachable for today)
         existing.total_value_try = total_value_try
         existing.daily_change_value = daily_change_value
         existing.daily_change_pct = daily_change_pct
+        existing.created_at = datetime.now(turkey_tz)  # Update recording time
     else:
         # Create new snapshot
         snapshot = models.DailySnapshot(
             user_id=user_id,
-            date=today,
+            date=snapshot_date,
             total_value_try=total_value_try,
             daily_change_value=daily_change_value,
             daily_change_pct=daily_change_pct
@@ -923,11 +948,73 @@ def create_daily_snapshot(db: Session, user_id: int):
     db.commit()
     
     return {
-        "date": today.isoformat(),
+        "date": snapshot_date.isoformat(),
         "total_value_try": total_value_try,
         "daily_change_value": daily_change_value,
-        "daily_change_pct": daily_change_pct
+        "daily_change_pct": daily_change_pct,
+        "status": "updated" if existing else "created"
     }
+
+
+def backfill_missing_snapshots(db: Session):
+    """
+    Check all users for missing snapshots from yesterday (and up to 7 days back).
+    For missing days, use the closest PREVIOUS snapshot's total_value as reference.
+    If no previous snapshot exists at all, skip — don't fabricate data.
+    Daily change values for backfilled days are set to 0 (we don't know the actual change).
+    """
+    from datetime import date, datetime, timedelta, timezone
+    
+    turkey_tz = timezone(timedelta(hours=3))
+    today = datetime.now(turkey_tz).date()
+    
+    users = db.query(models.User).all()
+    user_ids = [u.id for u in users]
+    created_count = 0
+    
+    for user_id in user_ids:
+        # Get user's most recent snapshot (before today) to use as reference
+        latest_snapshot = db.query(models.DailySnapshot).filter(
+            models.DailySnapshot.user_id == user_id,
+            models.DailySnapshot.date < today
+        ).order_by(models.DailySnapshot.date.desc()).first()
+        
+        # Check last 7 days for missing snapshots
+        for days_ago in range(1, 8):
+            check_date = today - timedelta(days=days_ago)
+            
+            existing = db.query(models.DailySnapshot).filter(
+                models.DailySnapshot.user_id == user_id,
+                models.DailySnapshot.date == check_date
+            ).first()
+            
+            if existing:
+                continue  # Already has data, skip
+            
+            # Only backfill if user already has at least one snapshot
+            # (meaning they had portfolio data before). Don't create data from nothing.
+            if not latest_snapshot:
+                continue
+            
+            # Use latest snapshot's total_value as reference, daily change = 0
+            try:
+                snapshot = models.DailySnapshot(
+                    user_id=user_id,
+                    date=check_date,
+                    total_value_try=float(latest_snapshot.total_value_try),
+                    daily_change_value=0.0,
+                    daily_change_pct=0.0
+                )
+                db.add(snapshot)
+                db.commit()
+                created_count += 1
+                print(f"  [BACKFILL] Snapshot for user {user_id} on {check_date} (total={latest_snapshot.total_value_try:.0f}, change=0)")
+            except Exception as e:
+                db.rollback()
+                print(f"  [ERROR] Backfill failed for user {user_id} on {check_date}: {e}")
+    
+    return created_count
+
 
 def get_daily_snapshots(db: Session, user_id: int, limit: int = 30):
     """Get the last N daily snapshots for a user."""

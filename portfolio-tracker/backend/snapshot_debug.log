@@ -1,0 +1,5 @@
+Creating snapshot for user 4 on 2026-02-09
+Result: {'date': '2026-02-09', 'total_value_try': 1622553.8723831552, 'daily_change_value': 11654.118462490851, 'daily_change_pct': 0.7234539849004662, 'status': 'created'}
+
+Now running full backfill...
+Backfill done: 0 snapshots created
