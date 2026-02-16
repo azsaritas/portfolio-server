@@ -916,11 +916,22 @@ def create_daily_snapshot(db: Session, user_id: int, target_date=None):
     
     # Calculate totals from holdings (cast to plain float to avoid numpy serialization issues)
     total_value_try = float(sum(h.get('total_value_try', 0) for h in holdings))
-    daily_change_value = float(sum(h.get('daily_change_value_try', 0) for h in holdings))
     
-    # Calculate percentage based on previous value
-    previous_value = total_value_try - daily_change_value
-    daily_change_pct = float((daily_change_value / previous_value * 100) if previous_value > 0 else 0)
+    # Calculate daily change by comparing with PREVIOUS day's snapshot
+    # This prevents stale yfinance daily_change from carrying over on weekends/holidays
+    prev_date = snapshot_date - timedelta(days=1)
+    prev_snapshot = db.query(models.DailySnapshot).filter(
+        models.DailySnapshot.user_id == user_id,
+        models.DailySnapshot.date == prev_date
+    ).first()
+    
+    if prev_snapshot and prev_snapshot.total_value_try > 0:
+        daily_change_value = float(total_value_try - prev_snapshot.total_value_try)
+        daily_change_pct = float(daily_change_value / prev_snapshot.total_value_try * 100)
+    else:
+        # No previous snapshot — first snapshot or missing data, daily change = 0
+        daily_change_value = 0.0
+        daily_change_pct = 0.0
     
     # Check if snapshot already exists for the target date
     existing = db.query(models.DailySnapshot).filter(
@@ -1044,9 +1055,21 @@ def get_portfolio_stats_from_snapshots(db: Session, user_id: int):
         return {}
     
     current_total = sum(h.get('total_value_try', 0) for h in holdings)
-    today_change_value = sum(h.get('daily_change_value_try', 0) for h in holdings)
-    today_previous = current_total - today_change_value
-    today_change_pct = (today_change_value / today_previous * 100) if today_previous > 0 else 0
+    
+    # Calculate today's daily change by comparing with yesterday's snapshot
+    # This prevents stale yfinance daily_change from carrying over on weekends/holidays
+    yesterday = today - timedelta(days=1)
+    yesterday_snapshot = db.query(models.DailySnapshot).filter(
+        models.DailySnapshot.user_id == user_id,
+        models.DailySnapshot.date == yesterday
+    ).first()
+    
+    if yesterday_snapshot and yesterday_snapshot.total_value_try > 0:
+        today_change_value = current_total - yesterday_snapshot.total_value_try
+        today_change_pct = (today_change_value / yesterday_snapshot.total_value_try * 100)
+    else:
+        today_change_value = 0
+        today_change_pct = 0
     
     # Get historical snapshots
     snapshots = db.query(models.DailySnapshot).filter(
