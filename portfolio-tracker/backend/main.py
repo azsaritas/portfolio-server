@@ -11,7 +11,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 import pytz
-
+#son çalışan
 # Scheduler for automatic daily snapshots
 scheduler = AsyncIOScheduler()
 
